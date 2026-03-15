@@ -15,6 +15,7 @@ from validator_test_utils import (
 )
 
 from autoresearch.mock import MockSubmissionFactory
+from autoresearch.validator.replay import ReplayStats
 from autoresearch.validator.stats import MinerStats
 from neurons.validator import Validator
 
@@ -31,6 +32,15 @@ def test_full_state_roundtrip(tmp_path) -> None:
             hotkey="miner-a", uid=0, total_experiments=3, total_improvements=1, best_val_bpb=0.99
         )
     }
+    validator.replay_stats = {
+        "miner-a": ReplayStats(
+            hotkey="miner-a",
+            attempts=2,
+            passes=1,
+            failures=1,
+            last_reason="mismatch",
+        )
+    }
     validator.save_state()
 
     restored = Validator(config=config)
@@ -40,6 +50,7 @@ def test_full_state_roundtrip(tmp_path) -> None:
     assert restored.tracker.val_bpb == 0.99
     assert restored.submission_hashes == {"hash-a": "miner-a"}
     assert restored.miner_stats["miner-a"].total_experiments == 3
+    assert restored.replay_stats["miner-a"].attempts == 2
 
 
 def test_first_run_empty_dir_defaults(tmp_path) -> None:
@@ -49,6 +60,7 @@ def test_first_run_empty_dir_defaults(tmp_path) -> None:
     assert validator.submission_hashes == {}
     assert validator.miner_stats == {}
     assert validator.tracker.achieved_by == "baseline"
+    assert validator.replay_stats == {}
 
 
 def test_health_missing_wallet_exits(tmp_path) -> None:
@@ -134,3 +146,4 @@ def test_periodic_save_every_10_steps(tmp_path) -> None:
     assert validator.state_path.exists()
     assert validator.guards_state_path.exists()
     assert validator.miner_stats_path.exists()
+    assert validator.replay_state_path.exists()

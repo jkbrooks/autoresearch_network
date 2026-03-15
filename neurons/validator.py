@@ -13,9 +13,11 @@ import numpy as np
 from numpy.typing import NDArray
 
 from autoresearch.base import BaseValidatorNeuron
+from autoresearch.experiment_runner import ExperimentRunner
 from autoresearch.hardware import detect_hardware
 from autoresearch.validator.best_tracker import BestTracker
 from autoresearch.validator.forward import forward as validator_forward
+from autoresearch.validator.replay import ReplaySampler, ReplayStats
 from autoresearch.validator.stats import MinerStats
 
 LOGGER = logging.getLogger(__name__)
@@ -41,9 +43,28 @@ class Validator(BaseValidatorNeuron):
         super().__init__(config=config)
         self.submission_hashes: dict[str, str] = {}
         self.miner_stats: dict[str, MinerStats] = {}
+        self.replay_stats: dict[str, ReplayStats] = {}
         self.log_messages: list[str] = []
         self.last_round: dict[str, object] = {}
         self.tracker = BestTracker(state_dir=self.neuron_path)
+        self.replay_sampler = ReplaySampler(sample_rate=self.replay_sample_rate)
+        self.replay_runner: ExperimentRunner | None = None
+        if self.replay_enabled:
+            if self.replay_mode != "shadow":
+                LOGGER.warning(
+                    "Replay mode '%s' is not implemented yet; replay disabled.",
+                    self.replay_mode,
+                )
+            else:
+                hardware = detect_hardware()
+                if hardware.vram_mb is None:
+                    LOGGER.warning("Replay enabled but no CUDA GPU detected; replay disabled.")
+                else:
+                    runner = ExperimentRunner(timeout_seconds=660)
+                    if runner.setup():
+                        self.replay_runner = runner
+                    else:
+                        LOGGER.warning("Replay setup failed; replay disabled.")
         self.load_state()
 
     @property
@@ -53,12 +74,44 @@ class Validator(BaseValidatorNeuron):
         return bool(getattr(self.config, "skip_health_check", False))
 
     @property
+    def replay_enabled(self) -> bool:
+        if isinstance(self.config, dict):
+            return bool(self.config.get("replay.enabled", False))
+        replay = getattr(self.config, "replay", None)
+        return bool(getattr(replay, "enabled", False))
+
+    @property
+    def replay_mode(self) -> str:
+        if isinstance(self.config, dict):
+            return str(self.config.get("replay.mode", "shadow"))
+        replay = getattr(self.config, "replay", None)
+        return str(getattr(replay, "mode", "shadow"))
+
+    @property
+    def replay_sample_rate(self) -> float:
+        if isinstance(self.config, dict):
+            return float(self.config.get("replay.sample_rate", 0.2))
+        replay = getattr(self.config, "replay", None)
+        return float(getattr(replay, "sample_rate", 0.2))
+
+    @property
+    def replay_tolerance(self) -> float:
+        if isinstance(self.config, dict):
+            return float(self.config.get("replay.tolerance", 0.02))
+        replay = getattr(self.config, "replay", None)
+        return float(getattr(replay, "tolerance", 0.02))
+
+    @property
     def guards_state_path(self) -> Any:
         return self.neuron_path / "submission_hashes.json"
 
     @property
     def miner_stats_path(self) -> Any:
         return self.neuron_path / "miner_stats.json"
+
+    @property
+    def replay_state_path(self) -> Any:
+        return self.neuron_path / "replay_stats.json"
 
     def _save_guards_state(self) -> None:
         self.guards_state_path.write_text(
@@ -88,17 +141,35 @@ class Validator(BaseValidatorNeuron):
             hotkey: MinerStats(**stats_payload) for hotkey, stats_payload in raw.items()
         }
 
+    def _save_replay_state(self) -> None:
+        payload = {hotkey: asdict(stats) for hotkey, stats in self.replay_stats.items()}
+        self.replay_state_path.write_text(
+            json.dumps(payload, indent=2, sort_keys=True),
+            encoding="utf-8",
+        )
+
+    def _load_replay_state(self) -> None:
+        if not self.replay_state_path.exists():
+            self.replay_stats = {}
+            return
+        raw = json.loads(self.replay_state_path.read_text(encoding="utf-8"))
+        self.replay_stats = {
+            hotkey: ReplayStats(**stats_payload) for hotkey, stats_payload in raw.items()
+        }
+
     def save_state(self) -> None:
         super().save_state()
         self.tracker.save()
         self._save_guards_state()
         self._save_miner_stats()
+        self._save_replay_state()
 
     def load_state(self) -> None:
         super().load_state()
         self.tracker.load()
         self._load_guards_state()
         self._load_miner_stats()
+        self._load_replay_state()
 
     def _log_health(self, level: str, name: str, message: str) -> None:
         suffix = f": {message}" if message else ""
@@ -197,6 +268,10 @@ def main() -> int:
         type=float,
         default=0.3,
     )
+    parser.add_argument("--replay.enabled", dest="replay.enabled", action="store_true")
+    parser.add_argument("--replay.mode", dest="replay.mode", default="shadow")
+    parser.add_argument("--replay.sample-rate", dest="replay.sample_rate", type=float, default=0.2)
+    parser.add_argument("--replay.tolerance", dest="replay.tolerance", type=float, default=0.02)
     args = parser.parse_args()
     if getattr(args, "logging.debug"):
         logging.basicConfig(level=logging.DEBUG)
@@ -221,6 +296,10 @@ def main() -> int:
             "full_path": args.neuron_full_path,
             "moving_average_alpha": args.moving_average_alpha,
         },
+        "replay.enabled": getattr(args, "replay.enabled"),
+        "replay.mode": getattr(args, "replay.mode"),
+        "replay.sample_rate": getattr(args, "replay.sample_rate"),
+        "replay.tolerance": getattr(args, "replay.tolerance"),
     }
     if mock_runtime:
         config["wallet"] = _make_runtime_wallet(wallet_name, wallet_hotkey)

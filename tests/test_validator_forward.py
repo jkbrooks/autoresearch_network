@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from types import SimpleNamespace
 
 import pytest
 from validator_test_utils import MockDendrite, MockMetagraph, make_custom_validator_config
 
 from autoresearch.constants import PARTICIPATION_SCORE, HardwareTier
 from autoresearch.mock import MockSubmissionFactory
+from autoresearch.validator.replay import ReplayResult
 from neurons.validator import Validator
 
 
@@ -127,3 +129,44 @@ def test_forward_no_active_miners_returns_empty(tmp_path, caplog) -> None:
 
     assert final_scores.shape == (0,)
     assert "Queried 0 miners | 0 responded" in caplog.text
+
+
+def test_forward_replay_shadow_records_stats_without_affecting_score(tmp_path, monkeypatch) -> None:
+    response = _make_response(baseline=1.0, improvement=0.02, seed=42)
+    config = make_custom_validator_config(
+        tmp_path,
+        uid=0,
+        metagraph=MockMetagraph(["miner-a"]),
+        dendrite=MockDendrite([response]),
+    )
+    config["replay.enabled"] = True
+    config["replay.mode"] = "shadow"
+    config["replay.sample_rate"] = 1.0
+    config["replay.tolerance"] = 0.02
+    monkeypatch.setattr(
+        "neurons.validator.detect_hardware",
+        lambda: SimpleNamespace(vram_mb=24_000.0),
+    )
+    monkeypatch.setattr("neurons.validator.ExperimentRunner.setup", lambda self: True)
+    monkeypatch.setattr(
+        "autoresearch.validator.forward.maybe_replay_submission",
+        lambda **kwargs: ReplayResult(
+            selected=True,
+            executed=True,
+            passed=True,
+            reason="match",
+            submitted_bpb=response.val_bpb,
+            replayed_bpb=response.val_bpb,
+            relative_diff=0.0,
+        ),
+    )
+
+    validator = Validator(config=config)
+    validator.tracker.val_bpb = 1.0
+    validator.tracker.train_py = "print('baseline')\n"
+
+    final_scores = asyncio.run(validator.forward())
+
+    assert final_scores[0] > PARTICIPATION_SCORE
+    assert "miner-a" in validator.replay_stats
+    assert validator.replay_stats["miner-a"].attempts == 1

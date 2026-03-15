@@ -13,6 +13,7 @@ from autoresearch.constants import HardwareTier
 from autoresearch.mock import MockSubmissionFactory
 from autoresearch.protocol import ExperimentSubmission
 from autoresearch.validator.guards import check_guards
+from autoresearch.validator.replay import maybe_replay_submission, update_replay_stats
 from autoresearch.validator.reward import get_rewards
 from autoresearch.validator.stats import format_leaderboard, update_miner_stats
 
@@ -91,6 +92,7 @@ async def forward(self: Any) -> NDArray[np.float64]:
     stage1_scores = get_rewards(list(responses), baseline_best)
     final_scores: list[float] = []
     recent_submissions: list[str] = []
+    replay_results: dict[str, object] = {}
     for uid, response, stage1_score in zip(miner_uids, responses, stage1_scores, strict=True):
         hotkey = str(self.metagraph.hotkeys[uid])
         multiplier = check_guards(
@@ -99,6 +101,26 @@ async def forward(self: Any) -> NDArray[np.float64]:
             recent_submissions,
             submitter_hotkey=hotkey,
         )
+        if self.replay_enabled and self.replay_mode == "shadow" and self.replay_runner is not None:
+            replay_result = maybe_replay_submission(
+                submission=response,
+                miner_uid=uid,
+                step=self.step,
+                sampler=self.replay_sampler,
+                runner=self.replay_runner,
+                tolerance=self.replay_tolerance,
+            )
+            replay_results[hotkey] = replay_result
+            update_replay_stats(self.replay_stats, hotkey=hotkey, replay_result=replay_result)
+            if replay_result.selected and replay_result.executed:
+                LOGGER.info(
+                    "[REPLAY SHADOW] uid=%s hotkey=%s passed=%s reason=%s diff=%s",
+                    uid,
+                    hotkey,
+                    replay_result.passed,
+                    replay_result.reason,
+                    replay_result.relative_diff,
+                )
         final_scores.append(float(stage1_score) * float(multiplier))
         train_py = getattr(response, "train_py", None)
         if train_py and train_py not in recent_submissions:
@@ -146,6 +168,7 @@ async def forward(self: Any) -> NDArray[np.float64]:
         "miner_uids": list(miner_uids),
         "stage1_scores": np.asarray(stage1_scores, dtype=float),
         "final_scores": final_scores_array,
+        "replay_results": replay_results,
     }
     self.step += 1
     if self.step % 10 == 0:
