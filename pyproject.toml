@@ -1,0 +1,62 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "autoresearch-network"
+version = "0.1.0"
+description = "Protocol scaffold for the AutoResearch Network Bittensor subnet."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [
+  { name = "AutoResearch Network Contributors" },
+]
+dependencies = [
+  "bittensor",
+  "numpy",
+  "pydantic",
+  "torch",
+]
+
+[dependency-groups]
+dev = [
+  "mypy",
+  "pytest",
+  "pytest-cov",
+  "ruff",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = [
+  "autoresearch",
+  "neurons",
+]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+
+[tool.ruff.lint]
+select = [
+  "E",
+  "F",
+  "I",
+  "B",
+  "UP",
+]
+
+[tool.mypy]
+python_version = "3.10"
+strict = true
+packages = ["autoresearch"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = [
+  "--cov=autoresearch.protocol",
+  "--cov=autoresearch.mock",
+  "--cov=autoresearch.constants",
+  "--cov-report=term-missing",
+  "--cov-fail-under=100",
+]
