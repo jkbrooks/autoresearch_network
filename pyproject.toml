@@ -13,9 +13,16 @@ authors = [
   { name = "AutoResearch Network Contributors" },
 ]
 dependencies = [
+  "anthropic",
   "bittensor",
   "numpy",
+  "openai",
+  "psutil",
   "pydantic",
+  "pyarrow",
+  "requests",
+  "rustbpe",
+  "tiktoken",
   "torch",
 ]
 

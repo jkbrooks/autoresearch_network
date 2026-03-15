@@ -22,10 +22,10 @@ from autoresearch.constants import (
 )
 from autoresearch.mock import MockSubmissionFactory
 from autoresearch.protocol import (
+    ExperimentSubmission,
     _demo_pacing,
     _emit_block,
     _emit_loading_state,
-    ExperimentSubmission,
     _format_elapsed,
     _hardware_tier_label,
     _progress_bar,
@@ -469,7 +469,9 @@ def test_protocol_main_demo_in_process(capsys: pytest.CaptureFixture[str]) -> No
     assert "MINER" in captured.out
     assert "SCORING" in captured.out
     assert "REJECTED" in captured.out
-    assert "Reject reason:     reported gain exceeds validator single-step threshold" in captured.out
+    assert (
+        "Reject reason:     reported gain exceeds validator single-step threshold" in captured.out
+    )
 
 
 def test_protocol_main_usage_returns_error(capsys: pytest.CaptureFixture[str]) -> None:

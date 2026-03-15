@@ -1,0 +1,8 @@
+[project]
+name = "autoresearch-data-program"
+version = "0.1.0"
+description = "Vendored AutoResearch data program metadata."
+requires-python = ">=3.10"
+
+[project.urls]
+homepage = "https://github.com/example/autoresearch"
