@@ -12,9 +12,12 @@ from scripts.modal_miner_193 import (
     build_bootstrap_script,
     build_miner_command,
     build_modal_secrets,
+    build_tcp_relay_command,
     get_tcp_tunnel,
     resolve_forward_hostname,
+    resolve_public_endpoint,
     validate_local_prereqs,
+    validate_public_ipv4,
     wait_for_startup_success,
 )
 
@@ -91,6 +94,72 @@ def test_resolve_forward_hostname_failure(monkeypatch: pytest.MonkeyPatch) -> No
     monkeypatch.setattr("scripts.modal_miner_193.socket.gethostbyname", boom)
     with pytest.raises(LauncherError, match="Could not resolve tunnel host"):
         resolve_forward_hostname("example.test")
+
+
+def test_validate_public_ipv4_accepts_literal_ipv4() -> None:
+    assert validate_public_ipv4("203.0.113.10") == "203.0.113.10"
+
+
+def test_validate_public_ipv4_rejects_hostname() -> None:
+    with pytest.raises(LauncherError, match="literal IPv4 address"):
+        validate_public_ipv4("relay.example.com")
+
+
+def test_resolve_public_endpoint_defaults_to_modal_forwarding(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = make_config(tmp_path)
+    monkeypatch.setattr("scripts.modal_miner_193.socket.gethostbyname", lambda host: "1.2.3.4")
+    advertised_ip, advertised_port, relay_command = resolve_public_endpoint(
+        config,
+        forwarded_host="modal.test",
+        forwarded_port=45678,
+    )
+    assert advertised_ip == "1.2.3.4"
+    assert advertised_port == 45678
+    assert relay_command is None
+
+
+def test_resolve_public_endpoint_uses_configured_stable_frontend(tmp_path: Path) -> None:
+    config = LaunchConfig(
+        repo_root=tmp_path,
+        wallet_dir=tmp_path,
+        public_ip="198.51.100.7",
+    )
+    advertised_ip, advertised_port, relay_command = resolve_public_endpoint(
+        config,
+        forwarded_host="modal.test",
+        forwarded_port=45678,
+    )
+    assert advertised_ip == "198.51.100.7"
+    assert advertised_port == 8091
+    assert relay_command == "socat TCP-LISTEN:8091,reuseaddr,fork TCP:modal.test:45678"
+
+
+def test_resolve_public_endpoint_requires_public_ip_when_port_only(tmp_path: Path) -> None:
+    config = LaunchConfig(
+        repo_root=tmp_path,
+        wallet_dir=tmp_path,
+        public_port=8091,
+    )
+    with pytest.raises(LauncherError, match="--public-port requires --public-ip"):
+        resolve_public_endpoint(
+            config,
+            forwarded_host="modal.test",
+            forwarded_port=45678,
+        )
+
+
+def test_build_tcp_relay_command_renders_expected_socat_command() -> None:
+    assert (
+        build_tcp_relay_command(
+            listen_port=8091,
+            forwarded_host="modal.test",
+            forwarded_port=45678,
+        )
+        == "socat TCP-LISTEN:8091,reuseaddr,fork TCP:modal.test:45678"
+    )
 
 
 def test_wait_for_startup_success_detects_serving_logs() -> None:

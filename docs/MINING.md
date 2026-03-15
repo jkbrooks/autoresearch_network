@@ -134,6 +134,86 @@ Look for:
 | OOM during training | Lower-memory mutation variants should cycle automatically; verify the GPU meets the minimum requirement. |
 | Zero emissions after a long wait | Check miner logs, wallet registration, and validator availability on the subnet. |
 
+## Modal Hybrid Path
+
+Pure Modal ingress is not a reliable long-lived Bittensor axon strategy. Modal can expose the
+miner process over raw TCP, but Bittensor validators still dial the numeric `external_ip` and
+`external_port` advertised on-chain. The documented Modal tunnel endpoint is a relay host and
+random port, not a stable public IPv4 reserved for the miner.
+
+If you still want Modal for GPU execution, put a small stable-IP VM in front of it.
+
+### Preferred Modal hybrid
+
+Deploy the miner as a persistent Modal HTTP endpoint:
+
+```bash
+AUTORESEARCH_PUBLIC_IP=<VM_PUBLIC_IPV4> \
+AUTORESEARCH_PUBLIC_PORT=8091 \
+modal deploy scripts/modal_miner_193_http.py
+```
+
+The deploy output will include the stable `modal.run` URL for the endpoint. Reverse-proxy the VM's
+public `8091` to that Modal URL. A minimal nginx shape is:
+
+```nginx
+server {
+    listen 8091;
+    server_name _;
+
+    location / {
+        proxy_pass https://YOUR_WORKSPACE--autoresearch-miner-193.modal.run;
+        proxy_http_version 1.1;
+        proxy_ssl_server_name on;
+        proxy_set_header Host YOUR_WORKSPACE--autoresearch-miner-193.modal.run;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto http;
+        proxy_request_buffering off;
+        proxy_buffering off;
+        proxy_read_timeout 15s;
+        proxy_send_timeout 15s;
+    }
+}
+```
+
+Then advertise only the VM endpoint:
+
+```bash
+btcli axon set --netuid 193 --ip <VM_PUBLIC_IPV4> --port 8091 --ip-type 4 --network test
+```
+
+### Current sandbox bridge
+
+The repository still includes the older raw-tunnel bridge for short-lived debugging. Use it only if
+you specifically want the existing sandbox flow:
+
+1. Launch the Modal miner with the VM's public IPv4:
+
+```bash
+python scripts/modal_miner_193.py launch \
+  --public-ip <VM_PUBLIC_IPV4> \
+  --public-port 8091
+```
+
+2. On the VM, forward the stable public port to the Modal tunnel target printed by the launcher:
+
+```bash
+socat TCP-LISTEN:8091,reuseaddr,fork TCP:<MODAL_TUNNEL_HOST>:<MODAL_TUNNEL_PORT>
+```
+
+3. Advertise only the stable VM endpoint to Bittensor:
+
+```bash
+btcli axon set --netuid 193 --ip <VM_PUBLIC_IPV4> --port 8091 --ip-type 4 --network test
+```
+
+This is still a workaround. For long-lived operation, the preferred production shape is a normal
+GPU VM with a stable public IPv4, or a stable-IP front end that owns the public axon surface and
+uses Modal only for backend compute.
+
 ## Validation Status
 
-This walkthrough was validated on 2026-03-14 against testnet subnet `193` using a Modal L4 GPU sandbox. For long-lived operation, prefer a dedicated GPU host instead of Modal's best-effort TCP forwarding path.
+This walkthrough was smoke-tested on 2026-03-14 against testnet subnet `193` using a Modal L4 GPU
+sandbox. The miner process booted and served locally inside Modal, but the fully public
+validator-to-miner response path did not complete through Modal's direct external routing. For
+long-lived operation, prefer a dedicated GPU host or the stable-IP front-end pattern above.

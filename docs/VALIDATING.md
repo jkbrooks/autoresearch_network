@@ -219,4 +219,17 @@ Live testnet validation on 2026-03-14 against subnet `193` confirmed checklist i
 - validator state files persisted under the configured `--neuron.full-path` across restart
 - weight submission succeeded against subtensor
 
-The remaining open item is checklist step 6. During the live run, the validator queried the real miner but did not receive a valid submission, so `global_best.json` and `best_train.py` were not updated from a better response yet. Follow-up debugging showed that the miner process was still listening inside the Modal sandbox, but direct Dendrite calls to the on-chain numeric axon endpoint returned `503 Service unavailable`, which points to a Modal external routing incompatibility with Bittensor's IP-based axon dialing rather than a validator startup failure.
+The remaining open item is checklist step 6. During the live run, the validator queried the real
+miner but did not receive a valid submission, so `global_best.json` and `best_train.py` were not
+updated from a better response yet. Follow-up debugging showed that the miner process was still
+listening inside the Modal sandbox, but direct Dendrite calls to the on-chain numeric axon
+endpoint returned `503 Service unavailable`, which points to a Modal external routing
+incompatibility with Bittensor's IP-based axon dialing rather than a validator startup failure.
+
+If you repeat the live test with Modal, do not advertise the resolved Modal relay IP directly.
+Instead, put a stable public VM in front. The preferred Modal path is now to deploy
+`scripts/modal_miner_193_http.py` and reverse-proxy that VM port to the deployed Modal web
+endpoint. The older raw tunnel launcher (`scripts/modal_miner_193.py launch --public-ip ...`) is
+still useful for debugging, but it should be treated as the temporary bridge path, not the desired
+steady state. The more robust alternative is still to move the miner to a dedicated GPU host with a
+stable public IPv4.

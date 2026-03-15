@@ -14,11 +14,14 @@ Important caveats:
   That is operationally risky and should only be used for short-lived testnet validation.
 - Modal raw TCP exposure is best-effort for Bittensor because the network still expects a
   routable literal IP address to be advertised on-chain.
+- For a less fragile setup, pass `--public-ip` (and optionally `--public-port`) for a
+  stable VM relay or public front end, then point that host at the Modal tunnel target.
 """
 
 from __future__ import annotations
 
 import argparse
+import ipaddress
 import os
 import shlex
 import socket
@@ -77,6 +80,9 @@ class LaunchConfig:
     wallet_dir: Path
     gpu: str = DEFAULT_GPU
     hours: int = DEFAULT_HOURS
+    public_ip: str | None = None
+    public_port: int | None = None
+    network: str = "test"
     mutation_provider: str | None = None
     mutation_model: str | None = None
     mutation_base_url: str | None = None
@@ -96,6 +102,7 @@ class LaunchSummary:
     forwarded_port: int
     advertised_ip: str
     advertised_port: int
+    relay_command: str | None
     miner_command: str
     terminate_command: str
     wallet_overview_command: str
@@ -108,6 +115,23 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     launch_parser = subparsers.add_parser("launch", help="Launch the Modal sandbox miner")
     launch_parser.add_argument("--gpu", default=DEFAULT_GPU)
     launch_parser.add_argument("--hours", type=int, default=DEFAULT_HOURS)
+    launch_parser.add_argument(
+        "--public-ip",
+        default=None,
+        help=(
+            "Stable public IPv4 to advertise on-chain instead of the resolved Modal relay IP. "
+            "Use the address of a VM relay or public axon front end."
+        ),
+    )
+    launch_parser.add_argument(
+        "--public-port",
+        type=int,
+        default=None,
+        help=(
+            "Stable public TCP port paired with --public-ip. Defaults to the miner port "
+            f"({MINER_PORT})."
+        ),
+    )
     launch_parser.add_argument("--mutation-provider", default=None)
     launch_parser.add_argument("--mutation-model", default=None)
     launch_parser.add_argument("--mutation-base-url", default=None)
@@ -153,6 +177,8 @@ def main(argv: list[str] | None = None) -> int:
         wallet_dir=Path(args.wallet_dir).expanduser().resolve(),
         gpu=args.gpu,
         hours=args.hours,
+        public_ip=args.public_ip,
+        public_port=args.public_port,
         mutation_provider=args.mutation_provider,
         mutation_model=args.mutation_model,
         mutation_base_url=args.mutation_base_url,
@@ -168,6 +194,8 @@ def main(argv: list[str] | None = None) -> int:
     print(f"  Forwarded port:    {summary.forwarded_port}")
     print(f"  Advertised IP:     {summary.advertised_ip}")
     print(f"  Advertised port:   {summary.advertised_port}")
+    if summary.relay_command:
+        print(f"  Relay command:     {summary.relay_command}")
     print(f"  Miner command:     {summary.miner_command}")
     print(f"  Terminate command: {summary.terminate_command}")
     print(f"  Wallet inspect:    {summary.wallet_overview_command}")
@@ -207,10 +235,17 @@ def launch_sandbox(config: LaunchConfig) -> LaunchSummary:
     forwarded_host = tunnel.unencrypted_host or tunnel.host
     forwarded_port = tunnel.unencrypted_port or tunnel.port
     print(f"Resolved tunnel endpoint {forwarded_host}:{forwarded_port}.", flush=True)
-    advertised_ip = resolve_forward_hostname(forwarded_host)
-    print(f"Resolved advertised IPv4 {advertised_ip}.", flush=True)
+    advertised_ip, advertised_port, relay_command = resolve_public_endpoint(
+        config,
+        forwarded_host=forwarded_host,
+        forwarded_port=forwarded_port,
+    )
+    print(f"Using advertised IPv4 {advertised_ip}:{advertised_port}.", flush=True)
+    if relay_command:
+        print("A stable front end is configured; point it at the Modal tunnel target.", flush=True)
+        print(f"Suggested relay command: {relay_command}", flush=True)
 
-    miner_command = build_miner_command(config, advertised_ip, forwarded_port)
+    miner_command = build_miner_command(config, advertised_ip, advertised_port)
     bootstrap_script = build_bootstrap_script(miner_command)
     print("Starting sandbox bootstrap and miner process...", flush=True)
     process = sandbox.exec(
@@ -227,7 +262,8 @@ def launch_sandbox(config: LaunchConfig) -> LaunchSummary:
         forwarded_host=forwarded_host,
         forwarded_port=forwarded_port,
         advertised_ip=advertised_ip,
-        advertised_port=forwarded_port,
+        advertised_port=advertised_port,
+        relay_command=relay_command,
         miner_command=shlex.join(miner_command),
         terminate_command=(
             "python scripts/modal_miner_193.py terminate "
@@ -256,7 +292,13 @@ def validate_local_prereqs(repo_root: Path, wallet_dir: Path) -> None:
         raise LauncherError(f"Wallet directory does not exist: {wallet_dir}")
 
 
-def build_image(modal: Any, repo_root: Path, wallet_dir: Path) -> Any:
+def build_image(
+    modal: Any,
+    repo_root: Path,
+    wallet_dir: Path,
+    *,
+    copy_local: bool = False,
+) -> Any:
     image = (
         modal.Image.debian_slim(python_version="3.11")
         .pip_install("uv")
@@ -264,11 +306,13 @@ def build_image(modal: Any, repo_root: Path, wallet_dir: Path) -> Any:
             repo_root,
             REMOTE_REPO_ROOT,
             ignore=repo_ignore_filter,
+            copy=copy_local,
         )
         .add_local_dir(
             wallet_dir,
             REMOTE_WALLET_DIR,
             ignore=wallet_ignore_filter,
+            copy=copy_local,
         )
     )
     return image
@@ -295,15 +339,25 @@ def build_miner_command(
     advertised_ipv4: str,
     forwarded_port: int,
 ) -> list[str]:
-    command = [
+    return [
         "uv",
         "run",
         "python",
         "neurons/miner.py",
+        *build_miner_cli_args(config, advertised_ipv4, forwarded_port),
+    ]
+
+
+def build_miner_cli_args(
+    config: LaunchConfig,
+    advertised_ipv4: str,
+    forwarded_port: int,
+) -> list[str]:
+    command = [
         "--netuid",
         str(NETUID),
         "--network",
-        "test",
+        config.network,
         "--wallet.name",
         WALLET_NAME,
         "--wallet.hotkey",
@@ -355,11 +409,55 @@ def get_tcp_tunnel(sandbox: Any, port: int) -> Any:
     return tunnels[port]
 
 
+def resolve_public_endpoint(
+    config: LaunchConfig,
+    *,
+    forwarded_host: str,
+    forwarded_port: int,
+) -> tuple[str, int, str | None]:
+    if config.public_port is not None and config.public_ip is None:
+        raise LauncherError("--public-port requires --public-ip.")
+    if config.public_ip is not None:
+        public_ip = validate_public_ipv4(config.public_ip)
+        public_port = config.public_port or MINER_PORT
+        relay_command = build_tcp_relay_command(
+            listen_port=public_port,
+            forwarded_host=forwarded_host,
+            forwarded_port=forwarded_port,
+        )
+        return public_ip, public_port, relay_command
+
+    advertised_ip = resolve_forward_hostname(forwarded_host)
+    return advertised_ip, forwarded_port, None
+
+
 def resolve_forward_hostname(hostname: str) -> str:
     try:
         return socket.gethostbyname(hostname)
     except OSError as exc:
         raise LauncherError(f"Could not resolve tunnel host '{hostname}' to IPv4") from exc
+
+
+def validate_public_ipv4(value: str) -> str:
+    try:
+        parsed = ipaddress.ip_address(value)
+    except ValueError as exc:
+        raise LauncherError(f"Public IP must be a literal IPv4 address, got '{value}'.") from exc
+    if parsed.version != 4:
+        raise LauncherError(f"Public IP must be IPv4, got '{value}'.")
+    return str(parsed)
+
+
+def build_tcp_relay_command(
+    *,
+    listen_port: int,
+    forwarded_host: str,
+    forwarded_port: int,
+) -> str:
+    return (
+        f"socat TCP-LISTEN:{listen_port},reuseaddr,fork "
+        f"TCP:{forwarded_host}:{forwarded_port}"
+    )
 
 
 def wait_for_startup_success(process: Any, *, startup_timeout_seconds: int) -> None:
