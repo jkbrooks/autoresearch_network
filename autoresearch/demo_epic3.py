@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 from unittest.mock import patch
 
 from autoresearch.experiment_runner import RunResult
@@ -39,10 +39,13 @@ async def _run_demo() -> dict[str, Any]:
         miner = Miner(config=build_config(["--mock", "--skip-health-check"]))
 
     miner._last_baseline = synapse.baseline_train_py
-    miner.strategy = SimpleNamespace(
-        propose=lambda _: "print('baseline')\nprint('mutated')\n"
+    miner.strategy = cast(
+        Any,
+        SimpleNamespace(
+            propose=lambda _: "print('baseline')\nprint('mutated')\n"
+        ),
     )
-    miner.runner = SimpleNamespace(run=lambda _: _build_demo_result())
+    miner.runner = cast(Any, SimpleNamespace(run=lambda _: _build_demo_result()))
 
     with patch("neurons.miner.detect_hardware_tier", lambda **_: SimpleNamespace(value="large")):
         result = await miner.forward(synapse)

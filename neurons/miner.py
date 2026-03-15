@@ -2,7 +2,8 @@
 
 import os
 import threading
-from typing import Any, Tuple
+from typing import Any
+from typing import Tuple as TypingTuple  # noqa: UP035
 
 import bittensor as bt
 
@@ -123,7 +124,9 @@ class Miner(BaseMinerNeuron):
         finally:
             self._experiment_lock.release()
 
-    async def blacklist(self, synapse: ExperimentSubmission) -> Tuple[bool, str]:
+    async def blacklist(  # noqa: UP006
+        self, synapse: ExperimentSubmission
+    ) -> TypingTuple[bool, str]:  # noqa: UP006
         hotkey = _extract_hotkey(getattr(synapse, "dendrite", None))
         if hotkey is None:
             return True, "Missing dendrite or hotkey"
