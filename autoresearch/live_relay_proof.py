@@ -21,6 +21,7 @@ DEFAULT_NETUID = 193
 DEFAULT_NETWORK = "test"
 DEFAULT_WALLET_NAME = "my-miner"
 DEFAULT_WALLET_HOTKEY = "default"
+DEFAULT_TARGET_HOTKEY = "default"
 DEFAULT_WALLET_PATH = "~/.bittensor/wallets"
 DEFAULT_VALIDATOR_STATE_PATH = ".validator-state-live/global_best.json"
 
@@ -59,6 +60,7 @@ async def _run_probe(
     wallet_name: str,
     wallet_hotkey: str,
     wallet_path: str,
+    target_hotkey: str | None,
     network: str,
     netuid: int,
     timeout: float,
@@ -72,7 +74,14 @@ async def _run_probe(
     subtensor = bt.Subtensor(network=network)
     metagraph = subtensor.metagraph(netuid)
 
-    target_uid = metagraph.hotkeys.index(wallet.hotkey.ss58_address)
+    target_ss58 = _resolve_target_ss58(
+        wallet_name=wallet_name,
+        wallet_path=wallet_path,
+        metagraph_hotkeys=list(metagraph.hotkeys),
+        target_hotkey=target_hotkey,
+        fallback_ss58=wallet.hotkey.ss58_address,
+    )
+    target_uid = metagraph.hotkeys.index(target_ss58)
     target_axon = metagraph.axons[target_uid]
     target_endpoint = f"{target_axon.ip}:{target_axon.port}"
 
@@ -114,6 +123,35 @@ def _load_validator_state(path: str) -> dict[str, Any] | None:
     return json.loads(state_path.read_text(encoding="utf-8"))
 
 
+def _resolve_target_ss58(
+    *,
+    wallet_name: str,
+    wallet_path: str,
+    metagraph_hotkeys: list[str],
+    target_hotkey: str | None,
+    fallback_ss58: str,
+) -> str:
+    if not target_hotkey:
+        return fallback_ss58
+    if target_hotkey in metagraph_hotkeys:
+        return target_hotkey
+
+    from bittensor_wallet.wallet import Wallet
+
+    try:
+        local_wallet = Wallet(name=wallet_name, hotkey=target_hotkey, path=wallet_path)
+        local_ss58 = local_wallet.hotkey.ss58_address
+    except Exception as exc:  # pragma: no cover - defensive for local wallet variance
+        raise ValueError(f"Unknown target hotkey '{target_hotkey}'.") from exc
+
+    if local_ss58 not in metagraph_hotkeys:
+        raise ValueError(
+            f"Target hotkey '{target_hotkey}' resolved to {local_ss58}, "
+            "but that hotkey is not registered on the target metagraph."
+        )
+    return local_ss58
+
+
 def run_live_relay_proof(
     *,
     as_json: bool = False,
@@ -121,6 +159,7 @@ def run_live_relay_proof(
     wallet_name: str = DEFAULT_WALLET_NAME,
     wallet_hotkey: str = DEFAULT_WALLET_HOTKEY,
     wallet_path: str = DEFAULT_WALLET_PATH,
+    target_hotkey: str | None = DEFAULT_TARGET_HOTKEY,
     network: str = DEFAULT_NETWORK,
     netuid: int = DEFAULT_NETUID,
     timeout: float = 120.0,
@@ -131,48 +170,50 @@ def run_live_relay_proof(
     is_interactive = True
     line_delay, section_delay, loading_pause = demo_pacing(is_interactive)
     started_at = time.perf_counter()
+    if not as_json:
+        emit_block(
+            [
+                "═══════════════════════════════════════════════════════",
+                f"  {style('AUTORESEARCH NETWORK — Live Relay Proof', CYAN, bold=True)}",
+                "═══════════════════════════════════════════════════════",
+                "",
+                style("[DISCOVERY] Inspecting the currently advertised miner endpoint", bold=True),
+                f"  Wallet hotkey:      {wallet_hotkey}",
+                f"  Target hotkey:      {target_hotkey or wallet_hotkey}",
+                f"  Network / netuid:   {network} / {netuid}",
+                "",
+            ],
+            line_delay=line_delay,
+            section_delay=section_delay,
+        )
 
-    emit_block(
-        [
-            "═══════════════════════════════════════════════════════",
-            f"  {style('AUTORESEARCH NETWORK — Live Relay Proof', CYAN, bold=True)}",
-            "═══════════════════════════════════════════════════════",
-            "",
-            style("[DISCOVERY] Inspecting the currently advertised miner endpoint", bold=True),
-            f"  Wallet hotkey:      {wallet_hotkey}",
-            f"  Network / netuid:   {network} / {netuid}",
-            "",
-        ],
-        line_delay=line_delay,
-        section_delay=section_delay,
-    )
-
-    emit_block(
-        [
-            style("[PROBE] Sending a signed Dendrite request through the relay", bold=True),
-            "  Request shape:      ExperimentSubmission",
-            "  Probe baseline:     plausible large-tier metrics",
-            "",
-        ],
-        line_delay=line_delay,
-        section_delay=0.0,
-    )
-    emit_loading_state(
-        total_duration=loading_pause,
-        phases=[
-            "wallet loaded: signed caller hotkey ready",
-            "metagraph synced: target axon discovered",
-            "relay path opened: public endpoint dialed",
-            "miner response returned: signed payload accepted",
-        ],
-        is_interactive=is_interactive,
-    )
+        emit_block(
+            [
+                style("[PROBE] Sending a signed Dendrite request through the relay", bold=True),
+                "  Request shape:      ExperimentSubmission",
+                "  Probe baseline:     plausible large-tier metrics",
+                "",
+            ],
+            line_delay=line_delay,
+            section_delay=0.0,
+        )
+        emit_loading_state(
+            total_duration=loading_pause,
+            phases=[
+                "wallet loaded: signed caller hotkey ready",
+                "metagraph synced: target axon discovered",
+                "relay path opened: public endpoint dialed",
+                "miner response returned: signed payload accepted",
+            ],
+            is_interactive=is_interactive,
+        )
 
     payload = asyncio.run(
         _run_probe(
             wallet_name=wallet_name,
             wallet_hotkey=wallet_hotkey,
             wallet_path=wallet_path,
+            target_hotkey=target_hotkey,
             network=network,
             netuid=netuid,
             timeout=timeout,
@@ -186,15 +227,25 @@ def run_live_relay_proof(
         return 0
 
     validator_state = payload.get("validator_state")
+    val_bpb = payload.get("val_bpb")
+    peak_vram_mb = payload.get("peak_vram_mb")
     emit_block(
         [
             f"  Target endpoint:    {payload['target_endpoint']}",
             f"  Dendrite status:    {payload['dendrite_status']} ({payload['dendrite_message']})",
             f"  Axon status:        {payload['axon_status']} ({payload['axon_message']})",
-            f"  Returned val_bpb:   {payload['val_bpb']:.6f}",
+            (
+                f"  Returned val_bpb:   {val_bpb:.6f}"
+                if isinstance(val_bpb, (int, float))
+                else "  Returned val_bpb:   <none>"
+            ),
             f"  Hardware tier:      {payload['hardware_tier']}",
             f"  Elapsed wall time:  {payload['elapsed_wall_seconds']} seconds",
-            f"  Peak VRAM:          {payload['peak_vram_mb']:,.1f} MB",
+            (
+                f"  Peak VRAM:          {peak_vram_mb:,.1f} MB"
+                if isinstance(peak_vram_mb, (int, float))
+                else "  Peak VRAM:          <none>"
+            ),
             "",
         ],
         line_delay=line_delay,
@@ -237,6 +288,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--wallet-name", default=DEFAULT_WALLET_NAME)
     parser.add_argument("--wallet-hotkey", default=DEFAULT_WALLET_HOTKEY)
     parser.add_argument("--wallet-path", default=DEFAULT_WALLET_PATH)
+    parser.add_argument(
+        "--target-hotkey",
+        default=DEFAULT_TARGET_HOTKEY,
+        help="Target miner hotkey name or SS58. Defaults to the serving `default` miner hotkey.",
+    )
     parser.add_argument("--network", default=DEFAULT_NETWORK)
     parser.add_argument("--netuid", type=int, default=DEFAULT_NETUID)
     parser.add_argument("--timeout", type=float, default=120.0)
@@ -248,6 +304,7 @@ def main(argv: list[str] | None = None) -> int:
         wallet_name=args.wallet_name,
         wallet_hotkey=args.wallet_hotkey,
         wallet_path=args.wallet_path,
+        target_hotkey=args.target_hotkey,
         network=args.network,
         netuid=args.netuid,
         timeout=args.timeout,
