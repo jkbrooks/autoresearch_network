@@ -15,8 +15,7 @@ class Miner(BaseMinerNeuron):
 
 def main() -> int:
     print(
-        "AutoResearch miner scaffold loaded. "
-        "Protocol behavior is not wired to a live subnet yet."
+        "AutoResearch miner scaffold loaded. Protocol behavior is not wired to a live subnet yet."
     )
     return 0
 

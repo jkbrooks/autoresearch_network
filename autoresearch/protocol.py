@@ -26,11 +26,11 @@ RED = "\033[31m"
 CYAN = "\033[36m"
 
 if TYPE_CHECKING:
+
     class SynapseBase:
         """Static typing stub for the runtime Bittensor synapse base."""
 
-        def __init__(self, **data: object) -> None:
-            ...
+        def __init__(self, **data: object) -> None: ...
 else:
     import bittensor as bt
 
@@ -212,7 +212,7 @@ def run_demo() -> int:
     )
     rejected = factory.make_invalid_submission(reason="impossible_improvement")
     tier = HardwareTier(submission.hardware_tier or HardwareTier.LARGE.value)
-    improvement = (submission.global_best_val_bpb - (submission.val_bpb or 0.0))
+    improvement = submission.global_best_val_bpb - (submission.val_bpb or 0.0)
     relative_gain_pct = (improvement / submission.global_best_val_bpb) * 100
     score = preview_score(
         global_best=submission.global_best_val_bpb,

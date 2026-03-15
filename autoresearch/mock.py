@@ -14,28 +14,31 @@ from autoresearch.protocol import ExperimentSubmission
 
 
 def _build_baseline_train_py() -> str:
-    return "\n".join(
-        [
-            "import math",
-            "import torch",
-            "",
-            "DEPTH = 8",
-            "WIDTH = 768",
-            "LEARNING_RATE = 0.0200",
-            'EXPERIMENT_NOTE = "baseline"',
-            "",
-            "def configure_run():",
-            "    return {",
-            '        "depth": DEPTH,',
-            '        "width": WIDTH,',
-            '        "learning_rate": LEARNING_RATE,',
-            '        "note": EXPERIMENT_NOTE,',
-            "    }",
-            "",
-            "def score_hint(loss: float) -> float:",
-            "    return loss / math.sqrt(DEPTH)",
-        ]
-    ) + "\n"
+    return (
+        "\n".join(
+            [
+                "import math",
+                "import torch",
+                "",
+                "DEPTH = 8",
+                "WIDTH = 768",
+                "LEARNING_RATE = 0.0200",
+                'EXPERIMENT_NOTE = "baseline"',
+                "",
+                "def configure_run():",
+                "    return {",
+                '        "depth": DEPTH,',
+                '        "width": WIDTH,',
+                '        "learning_rate": LEARNING_RATE,',
+                '        "note": EXPERIMENT_NOTE,',
+                "    }",
+                "",
+                "def score_hint(loss: float) -> float:",
+                "    return loss / math.sqrt(DEPTH)",
+            ]
+        )
+        + "\n"
+    )
 
 
 def _build_modified_train_py(
