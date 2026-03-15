@@ -8,16 +8,48 @@ import re
 import shutil
 import signal
 import subprocess
+import sys
 import tempfile
+import time
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
 LOGGER = logging.getLogger(__name__)
+
+MetricValue = float | int | None
+EXPECTED_METRIC_KEYS: tuple[str, ...] = (
+    "val_bpb",
+    "training_seconds",
+    "total_seconds",
+    "peak_vram_mb",
+    "mfu_percent",
+    "total_tokens_m",
+    "num_steps",
+    "num_params_m",
+    "depth",
+)
+
+_METRIC_RE = re.compile(
+    r"^\s*([A-Za-z][A-Za-z0-9 _./-]*)\s*:\s*("
+    r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?|inf|-inf|nan"
+    r")\s*$",
+    re.MULTILINE,
+)
 
 
 @dataclass
 class RunResult:
+    """Combined result model for low-level execution and parsed experiment metrics."""
+
+    command: tuple[str, ...] = ()
+    return_code: int = 0
+    stdout: str = ""
+    stderr: str = ""
+    timed_out: bool = False
+    elapsed_seconds: float = 0.0
+    process_group: int | None = None
+
     val_bpb: float | None = None
     training_seconds: float | None = None
     total_seconds: float | None = None
@@ -31,23 +63,110 @@ class RunResult:
     status: str = "pending"
 
 
-def parse_metrics(log: str) -> dict[str, Any]:
-    patterns: dict[str, tuple[str, type[Any]]] = {
-        "val_bpb": (r"^val_bpb:\s+([\d.]+)", float),
-        "training_seconds": (r"^training_seconds:\s+([\d.]+)", float),
-        "total_seconds": (r"^total_seconds:\s+([\d.]+)", float),
-        "peak_vram_mb": (r"^peak_vram_mb:\s+([\d.]+)", float),
-        "mfu_percent": (r"^mfu_percent:\s+([\d.]+)", float),
-        "total_tokens_m": (r"^total_tokens_M:\s+([\d.]+)", float),
-        "num_steps": (r"^num_steps:\s+(\d+)", int),
-        "num_params_m": (r"^num_params_M:\s+([\d.]+)", float),
-        "depth": (r"^depth:\s+(\d+)", int),
-    }
-    parsed: dict[str, Any] = {}
-    for key, (pattern, caster) in patterns.items():
-        match = re.search(pattern, log, re.MULTILINE)
-        parsed[key] = caster(match.group(1)) if match else None
+def _normalize_metric_key(raw_key: str) -> str:
+    return (
+        raw_key.strip()
+        .lower()
+        .replace(" ", "_")
+        .replace("-", "_")
+        .replace(".", "_")
+        .replace("/", "_")
+    )
+
+
+def parse_metrics(log: str) -> dict[str, MetricValue]:
+    """Parse scalar key/value metrics from train.py or helper logs."""
+
+    parsed: dict[str, MetricValue] = {key: None for key in EXPECTED_METRIC_KEYS}
+    for match in _METRIC_RE.finditer(log):
+        key = _normalize_metric_key(match.group(1))
+        raw_value = match.group(2)
+        value = float(raw_value)
+        if key in {"num_steps", "depth"} and value.is_integer():
+            parsed[key] = int(value)
+        else:
+            parsed[key] = value
     return parsed
+
+
+def _spawn_process_group(
+    command: Sequence[str], *, cwd: Path | None, env: Mapping[str, str] | None
+) -> subprocess.Popen[str]:
+    preexec_fn = os.setsid if os.name == "posix" else None
+    return subprocess.Popen(
+        list(command),
+        cwd=str(cwd) if cwd is not None else None,
+        env=dict(os.environ, **env) if env is not None else None,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        preexec_fn=preexec_fn,
+    )
+
+
+def _kill_process_group(process: subprocess.Popen[str]) -> None:
+    if os.name != "posix":
+        process.kill()
+        return
+
+    if process.pid is None:
+        return
+
+    try:
+        process_group = os.getpgid(process.pid)
+    except ProcessLookupError:
+        return
+
+    try:
+        os.killpg(process_group, signal.SIGTERM)
+    except ProcessLookupError:
+        return
+    time.sleep(0.05)
+    try:
+        process.kill()
+    except ProcessLookupError:
+        return
+
+
+def run_experiment(
+    *,
+    command: Sequence[str],
+    cwd: Path | None = None,
+    timeout_seconds: float = 180.0,
+    env: Mapping[str, str] | None = None,
+    spawn: Callable[..., subprocess.Popen[str]] = _spawn_process_group,
+) -> RunResult:
+    """Execute a command with timeout and process-group cleanup."""
+
+    started_at = time.perf_counter()
+    process = spawn(command=command, cwd=cwd, env=env)
+    process_group: int | None = None
+    if os.name == "posix" and process.pid is not None:
+        try:
+            process_group = os.getpgid(process.pid)
+        except ProcessLookupError:
+            process_group = None
+
+    timed_out = False
+    stdout = ""
+    stderr = ""
+    try:
+        stdout, stderr = process.communicate(timeout=timeout_seconds)
+    except subprocess.TimeoutExpired:
+        timed_out = True
+        _kill_process_group(process)
+        stdout, stderr = process.communicate()
+
+    elapsed_seconds = time.perf_counter() - started_at
+    return RunResult(
+        command=tuple(command),
+        return_code=process.returncode if process.returncode is not None else 1,
+        stdout=stdout,
+        stderr=stderr,
+        timed_out=timed_out,
+        elapsed_seconds=elapsed_seconds,
+        process_group=process_group,
+    )
 
 
 class ExperimentRunner:
@@ -77,74 +196,93 @@ class ExperimentRunner:
             return True
 
         LOGGER.info("AutoResearch cache missing at %s; running prepare.py", self.data_cache_dir)
-        result = subprocess.run(
-            self.command_prefix + [self.prepare_py_path.name],
+        prepared = run_experiment(
+            command=[*self.command_prefix, self.prepare_py_path.name],
             cwd=self.prepare_py_path.parent,
-            capture_output=True,
-            text=True,
-            check=False,
+            timeout_seconds=self.timeout_seconds,
         )
-        if result.returncode != 0:
-            LOGGER.error("prepare.py failed: %s", result.stderr or result.stdout)
+        if prepared.return_code != 0 or prepared.timed_out:
+            output = prepared.stderr or prepared.stdout
+            LOGGER.error("prepare.py failed: %s", output.strip())
             return False
-        return True
+        return self._cache_ready()
 
     def run(self, train_py_source: str) -> RunResult:
         work_dir = Path(tempfile.mkdtemp(prefix="autoresearch-run-"))
-        result = RunResult()
-        process: subprocess.Popen[str] | None = None
         try:
             (work_dir / "train.py").write_text(train_py_source, encoding="utf-8")
             shutil.copy2(self.prepare_py_path, work_dir / "prepare.py")
             shutil.copy2(self.runner_pyproject_path, work_dir / "pyproject.toml")
 
-            process = subprocess.Popen(
-                self.command_prefix + ["train.py"],
+            executed = run_experiment(
+                command=[*self.command_prefix, "train.py"],
                 cwd=work_dir,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                start_new_session=True,
+                timeout_seconds=self.timeout_seconds,
             )
-            try:
-                stdout, _ = process.communicate(timeout=self.timeout_seconds)
-            except subprocess.TimeoutExpired:
-                if process.pid is not None:
-                    os.killpg(process.pid, signal.SIGTERM)
-                stdout, _ = process.communicate()
-                result.run_log_tail = self._tail(stdout)
-                result.status = "timeout"
-                return result
+            combined_output = executed.stdout
+            if executed.stderr:
+                combined_output = (
+                    f"{combined_output}\n{executed.stderr}"
+                    if combined_output
+                    else executed.stderr
+                )
+            metrics = parse_metrics(combined_output)
 
-            result.run_log_tail = self._tail(stdout)
-            if process.returncode != 0:
-                result.status = "crash"
-                return result
+            status = "success"
+            if executed.timed_out:
+                status = "timeout"
+            elif executed.return_code != 0:
+                status = "crash"
 
-            parsed = parse_metrics(stdout)
-            result = RunResult(
-                val_bpb=parsed["val_bpb"],
-                training_seconds=parsed["training_seconds"],
-                total_seconds=parsed["total_seconds"],
-                peak_vram_mb=parsed["peak_vram_mb"],
-                mfu_percent=parsed["mfu_percent"],
-                total_tokens_m=parsed["total_tokens_m"],
-                num_steps=parsed["num_steps"],
-                num_params_m=parsed["num_params_m"],
-                depth=parsed["depth"],
-                run_log_tail=self._tail(stdout),
-                status="success",
+            return RunResult(
+                command=executed.command,
+                return_code=executed.return_code,
+                stdout=executed.stdout,
+                stderr=executed.stderr,
+                timed_out=executed.timed_out,
+                elapsed_seconds=executed.elapsed_seconds,
+                process_group=executed.process_group,
+                val_bpb=_as_float(metrics.get("val_bpb")),
+                training_seconds=_as_float(metrics.get("training_seconds")),
+                total_seconds=_as_float(metrics.get("total_seconds")),
+                peak_vram_mb=_as_float(metrics.get("peak_vram_mb")),
+                mfu_percent=_as_float(metrics.get("mfu_percent")),
+                total_tokens_m=_as_float(metrics.get("total_tokens_m")),
+                num_steps=_as_int(metrics.get("num_steps")),
+                num_params_m=_as_float(metrics.get("num_params_m")),
+                depth=_as_int(metrics.get("depth")),
+                run_log_tail=self._tail(combined_output),
+                status=status,
             )
-            return result
         finally:
             shutil.rmtree(work_dir, ignore_errors=True)
 
     def _cache_ready(self) -> bool:
         if not self.data_cache_dir.exists():
             return False
+        if any(self.data_cache_dir.rglob("*.parquet")):
+            return True
         return any(self.data_cache_dir.rglob("*.bin"))
 
     @staticmethod
     def _tail(log: str, lines: int = 100) -> str:
         split = log.splitlines()
         return "\n".join(split[-lines:])
+
+
+def default_prepare_command(program_path: str | Path, *, timeout: float = 180.0) -> RunResult:
+    """Run the vendored prepare script directly through the Python interpreter."""
+
+    return run_experiment(command=[sys.executable, str(program_path)], timeout_seconds=timeout)
+
+
+def _as_float(value: MetricValue) -> float | None:
+    if value is None:
+        return None
+    return float(value)
+
+
+def _as_int(value: MetricValue) -> int | None:
+    if value is None:
+        return None
+    return int(value)
