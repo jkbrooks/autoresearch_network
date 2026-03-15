@@ -235,6 +235,7 @@ def main() -> int:
     if args.run_once:
         final_scores = asyncio.run(validator.forward())
         print("Round complete:", final_scores.tolist())
+    validator.save_state()
     return 0
 
 

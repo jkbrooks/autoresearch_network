@@ -119,3 +119,36 @@ def test_validator_cli_accepts_ticket_flags_with_mock_runtime(tmp_path) -> None:
     assert result.returncode == 0
     assert "netuid=11" in result.stdout
     assert "network=test" in result.stdout
+
+
+def test_validator_cli_run_once_persists_state_files(tmp_path) -> None:
+    state_dir = tmp_path / "validator-state"
+    result = subprocess.run(
+        [
+            sys.executable,
+            "neurons/validator.py",
+            "--netuid",
+            "1",
+            "--subtensor.network",
+            "test",
+            "--wallet.name",
+            "validator-wallet",
+            "--wallet.hotkey",
+            "validator-hotkey",
+            "--subtensor._mock",
+            "--skip-health-check",
+            "--run-once",
+            "--neuron.full-path",
+            str(state_dir),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert (state_dir / "state.npz").exists()
+    assert (state_dir / "global_best.json").exists()
+    assert (state_dir / "best_train.py").exists()
+    assert (state_dir / "submission_hashes.json").exists()
+    assert (state_dir / "miner_stats.json").exists()
