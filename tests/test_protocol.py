@@ -427,7 +427,7 @@ def test_demo_runs_without_error() -> None:
 
 def test_demo_output_contains_key_sections() -> None:
     result = subprocess.run(
-        [sys.executable, "-m", "autoresearch"],
+        [sys.executable, "-m", "autoresearch", "protocol-demo"],
         cwd=Path(__file__).resolve().parents[1],
         capture_output=True,
         text=True,
@@ -481,7 +481,7 @@ def test_protocol_main_usage_returns_error(capsys: pytest.CaptureFixture[str]) -
     captured = capsys.readouterr()
 
     assert exit_code == 1
-    assert "Usage: python -m autoresearch.protocol [demo]" in captured.err
+    assert "Usage: python -m autoresearch.protocol [demo|validator-showcase]" in captured.err
 
 
 def test_package_main_uses_sys_argv(
@@ -494,8 +494,8 @@ def test_package_main_uses_sys_argv(
     captured = capsys.readouterr()
 
     assert exit_code == 0
-    assert "AUTORESEARCH NETWORK" in captured.out
-    assert "Validator Submission Cycle" in captured.out
+    assert "Usage: python -m autoresearch <command>" in captured.out
+    assert "live-relay-proof" in captured.out
 
 
 def test_package_main_demo_alias_still_works(
@@ -509,3 +509,43 @@ def test_package_main_demo_alias_still_works(
 
     assert exit_code == 0
     assert "Validator Submission Cycle" in captured.out
+
+
+def test_package_main_validator_showcase_alias_works(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(sys, "argv", ["autoresearch", "validator-showcase"])
+
+    exit_code = autoresearch_main.main()
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert "Validator Round Walkthrough" in captured.out
+    assert "Weight submitted" in captured.out
+
+
+def test_package_main_protocol_demo_command_works(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(sys, "argv", ["autoresearch", "protocol-demo"])
+
+    exit_code = autoresearch_main.main()
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert "Validator Submission Cycle" in captured.out
+
+
+def test_package_main_unknown_command_returns_error(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(sys, "argv", ["autoresearch", "not-a-command"])
+
+    exit_code = autoresearch_main.main()
+    captured = capsys.readouterr()
+
+    assert exit_code == 1
+    assert "Usage: python -m autoresearch <command>" in captured.err

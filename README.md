@@ -56,14 +56,20 @@ uv run pytest
 python -m pip install -e .
 ```
 
-## Run The Demo
+## CLI
 
 ```bash
-python -m autoresearch
-python -m autoresearch.protocol
+python -m autoresearch --help
+python -m autoresearch protocol-demo
+python -m autoresearch validator-showcase
+python -m autoresearch live-relay-proof
+python -m autoresearch miner-probe
+python autoresearch/validator_round_showcase.py
 ```
 
-The demo is self-contained and does not require a GPU, Bittensor wallet, subnet registration, or network access after dependencies are installed.
+`protocol-demo` and `validator-showcase` are local walkthroughs. `live-relay-proof` and
+`miner-probe` use the current relay-backed network path and therefore require the live testnet
+setup to be available.
 
 ## Development Checks
 

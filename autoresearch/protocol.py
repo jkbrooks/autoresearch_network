@@ -5,6 +5,7 @@ from __future__ import annotations
 import difflib
 import sys
 import time
+import warnings
 from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
@@ -18,12 +19,29 @@ from autoresearch.constants import (
     TIER_PLAUSIBILITY,
     HardwareTier,
 )
-
-RESET = "\033[0m"
-BOLD = "\033[1m"
-GREEN = "\033[32m"
-RED = "\033[31m"
-CYAN = "\033[36m"
+from autoresearch.demo_format import (
+    CYAN,
+    GREEN,
+    RED,
+)
+from autoresearch.demo_format import (
+    demo_pacing as _demo_pacing,
+)
+from autoresearch.demo_format import (
+    emit_block as _emit_block,
+)
+from autoresearch.demo_format import (
+    emit_loading_state as _shared_emit_loading_state,
+)
+from autoresearch.demo_format import (
+    format_elapsed as _format_elapsed,
+)
+from autoresearch.demo_format import (
+    progress_bar as _shared_progress_bar,
+)
+from autoresearch.demo_format import (
+    style as _style,
+)
 
 if TYPE_CHECKING:
 
@@ -32,6 +50,11 @@ if TYPE_CHECKING:
 
         def __init__(self, **data: object) -> None: ...
 else:
+    warnings.filterwarnings(
+        "ignore",
+        category=UserWarning,
+        module=r"pydantic\.plugin\._schema_validator",
+    )
     import bittensor as bt
 
     SynapseBase = bt.Synapse
@@ -121,11 +144,6 @@ def preview_score(*, global_best: float, submitted: float) -> float:
     return min(MAX_SCORE, (improvement / global_best) * 200)
 
 
-def _style(text: str, color: str = "", *, bold: bool = False) -> str:
-    prefix = f"{BOLD if bold else ''}{color}"
-    return f"{prefix}{text}{RESET}" if prefix else text
-
-
 def _hardware_tier_label(tier: HardwareTier) -> str:
     if tier is HardwareTier.SMALL:
         return "small (≤8 GB)"
@@ -149,51 +167,35 @@ def _diff_preview(before: str, after: str, *, limit: int = 3) -> list[str]:
     return changed[:limit]
 
 
-def _format_elapsed(elapsed_seconds: float) -> str:
-    if elapsed_seconds < 1:
-        return f"{elapsed_seconds:.3f} seconds"
-    return f"{elapsed_seconds:.2f} seconds"
-
-
-def _demo_pacing(is_interactive: bool) -> tuple[float, float, float]:
-    if is_interactive:
-        return 0.2, 0.5, 10.0
-    return 0.0, 0.0, 0.0
-
-
-def _emit_block(lines: Sequence[str], *, line_delay: float, section_delay: float) -> None:
-    for line in lines:
-        print(line, flush=True)
-        time.sleep(line_delay)
-    time.sleep(section_delay)
-
-
 def _progress_bar(progress: float, *, width: int = 20) -> str:
-    filled = round(progress * width)
-    return f"[{'█' * filled}{'░' * (width - filled)}]"
+    return _shared_progress_bar(progress, width=width)
 
 
 def _emit_loading_state(*, total_duration: float, is_interactive: bool) -> None:
-    if not is_interactive:
-        return
+    _emit_loading_state_shared(
+        total_duration=total_duration,
+        phases=[
+            "warmup complete: baseline checkpoint loaded",
+            "compiler ready: kernels and optimizer state prepared",
+            "throughput stable: step timings converging",
+            "validation sweep: score trace and VRAM samples locked",
+            "payload ready: submission package finalized",
+        ],
+        is_interactive=is_interactive,
+    )
 
-    phases = [
-        "warmup complete: baseline checkpoint loaded",
-        "compiler ready: kernels and optimizer state prepared",
-        "throughput stable: step timings converging",
-        "validation sweep: score trace and VRAM samples locked",
-        "payload ready: submission package finalized",
-    ]
-    step_duration = total_duration / len(phases)
-    for index, phase in enumerate(phases, start=1):
-        progress = index / len(phases)
-        print(
-            "  Progress:         "
-            f"{_style(_progress_bar(progress), CYAN, bold=True)} "
-            f"{int(progress * 100):>3}%  {phase}",
-            flush=True,
-        )
-        time.sleep(step_duration)
+
+def _emit_loading_state_shared(
+    *,
+    total_duration: float,
+    phases: Sequence[str],
+    is_interactive: bool,
+) -> None:
+    _shared_emit_loading_state(
+        total_duration=total_duration,
+        phases=phases,
+        is_interactive=is_interactive,
+    )
 
 
 def run_demo() -> int:
@@ -342,7 +344,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = list(argv if argv is not None else sys.argv[1:])
     if args in ([], ["demo"]):
         return run_demo()
-    print("Usage: python -m autoresearch.protocol [demo]", file=sys.stderr)
+    if args == ["validator-showcase"]:
+        from autoresearch.validator_round_showcase import run_showcase
+
+        return run_showcase()
+    print(
+        "Usage: python -m autoresearch.protocol [demo|validator-showcase]",
+        file=sys.stderr,
+    )
     return 1
 
 
