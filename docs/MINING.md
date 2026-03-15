@@ -52,11 +52,9 @@ btcli wallet new_hotkey --wallet.name my-miner --wallet.hotkey default
 ## Register on Testnet
 
 ```bash
-btcli subnet register --netuid <NETUID> --network test \
+btcli subnet register --netuid 193 --network test \
   --wallet.name my-miner --wallet.hotkey default
 ```
-
-Replace `<NETUID>` with the deployed testnet subnet ID.
 
 ## Configure LLM Mutations (Optional)
 
@@ -94,7 +92,7 @@ With structured mutations:
 
 ```bash
 python neurons/miner.py \
-  --netuid <NETUID> \
+  --netuid 193 \
   --network test \
   --wallet.name my-miner \
   --wallet.hotkey default \
@@ -105,7 +103,7 @@ With an LLM provider:
 
 ```bash
 python neurons/miner.py \
-  --netuid <NETUID> \
+  --netuid 193 \
   --network test \
   --wallet.name my-miner \
   --wallet.hotkey default \
@@ -138,4 +136,4 @@ Look for:
 
 ## Validation Status
 
-This document is structurally complete for Epic 3, but the full manual testnet walkthrough is still required once the miner is exercised on a real GPU machine and the final subnet ID is known.
+This walkthrough was validated on 2026-03-14 against testnet subnet `193` using a Modal L4 GPU sandbox. For long-lived operation, prefer a dedicated GPU host instead of Modal's best-effort TCP forwarding path.
