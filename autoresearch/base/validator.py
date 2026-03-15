@@ -299,6 +299,17 @@ class BaseValidatorNeuron:
             "netuid": self.netuid,
             "uids": uids,
             "weights": weights_array.tolist(),
+            "mev_protection": bool(_config_value(self.config, "weights.mev_protection", False)),
+            "period": int(_config_value(self.config, "weights.period", 128)),
+            "wait_for_inclusion": bool(
+                _config_value(self.config, "weights.wait_for_inclusion", False)
+            ),
+            "wait_for_finalization": bool(
+                _config_value(self.config, "weights.wait_for_finalization", False)
+            ),
+            "wait_for_revealed_execution": bool(
+                _config_value(self.config, "weights.wait_for_revealed_execution", False)
+            ),
         }
         self.last_set_weights = payload
 
