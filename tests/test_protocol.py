@@ -21,7 +21,16 @@ from autoresearch.constants import (
     HardwareTier,
 )
 from autoresearch.mock import MockSubmissionFactory
-from autoresearch.protocol import ExperimentSubmission, _hardware_tier_label, preview_score
+from autoresearch.protocol import (
+    _demo_pacing,
+    _emit_block,
+    _emit_loading_state,
+    ExperimentSubmission,
+    _format_elapsed,
+    _hardware_tier_label,
+    _progress_bar,
+    preview_score,
+)
 from autoresearch.protocol import main as protocol_main
 
 
@@ -362,10 +371,48 @@ def test_hardware_tier_label_formats_all_tiers(tier: HardwareTier, label: str) -
     assert _hardware_tier_label(tier) == label
 
 
+def test_format_elapsed_uses_subsecond_precision() -> None:
+    assert _format_elapsed(0.3456) == "0.346 seconds"
+    assert _format_elapsed(1.234) == "1.23 seconds"
+
+
+def test_demo_pacing_differs_for_interactive_output() -> None:
+    assert _demo_pacing(True) == (0.2, 0.5, 10.0)
+    assert _demo_pacing(False) == (0.0, 0.0, 0.0)
+
+
+def test_emit_block_prints_all_lines(capsys: pytest.CaptureFixture[str]) -> None:
+    _emit_block(["alpha", "beta"], line_delay=0.0, section_delay=0.0)
+    assert capsys.readouterr().out == "alpha\nbeta\n"
+
+
+def test_progress_bar_renders_expected_width() -> None:
+    assert _progress_bar(0.5, width=10) == "[█████░░░░░]"
+
+
+def test_emit_loading_state_is_noop_when_not_interactive(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _emit_loading_state(total_duration=0.0, is_interactive=False)
+    assert capsys.readouterr().out == ""
+
+
+def test_emit_loading_state_prints_progress_when_interactive(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(time, "sleep", lambda _: None)
+    _emit_loading_state(total_duration=0.0, is_interactive=True)
+    output = capsys.readouterr().out
+    assert output.count("Progress:") == 5
+    assert "warmup complete" in output
+    assert "payload ready" in output
+
+
 def test_demo_runs_without_error() -> None:
     start = time.perf_counter()
     result = subprocess.run(
-        [sys.executable, "-m", "autoresearch", "demo"],
+        [sys.executable, "-m", "autoresearch"],
         cwd=Path(__file__).resolve().parents[1],
         capture_output=True,
         text=True,
@@ -380,7 +427,7 @@ def test_demo_runs_without_error() -> None:
 
 def test_demo_output_contains_key_sections() -> None:
     result = subprocess.run(
-        [sys.executable, "-m", "autoresearch", "demo"],
+        [sys.executable, "-m", "autoresearch"],
         cwd=Path(__file__).resolve().parents[1],
         capture_output=True,
         text=True,
@@ -392,11 +439,17 @@ def test_demo_output_contains_key_sections() -> None:
     assert "VALID" in result.stdout
     assert "SCORING" in result.stdout
     assert "REJECTED" in result.stdout
+    assert "Elapsed time:      298 seconds" in result.stdout
+    assert "Validator Submission Cycle" in result.stdout
+    assert "reported gain exceeds validator single-step threshold" in result.stdout
+    assert "Creating experiment challenge..." in result.stdout
+    assert "Candidate state:   validator challenge returned with implausible gain" in result.stdout
+    assert "Awaiting next validator round." in result.stdout
 
 
 def test_protocol_module_demo_runs() -> None:
     result = subprocess.run(
-        [sys.executable, "-m", "autoresearch.protocol", "demo"],
+        [sys.executable, "-m", "autoresearch.protocol"],
         cwd=Path(__file__).resolve().parents[1],
         capture_output=True,
         text=True,
@@ -407,7 +460,7 @@ def test_protocol_module_demo_runs() -> None:
 
 
 def test_protocol_main_demo_in_process(capsys: pytest.CaptureFixture[str]) -> None:
-    exit_code = protocol_main(["demo"])
+    exit_code = protocol_main([])
 
     captured = capsys.readouterr()
 
@@ -416,18 +469,33 @@ def test_protocol_main_demo_in_process(capsys: pytest.CaptureFixture[str]) -> No
     assert "MINER" in captured.out
     assert "SCORING" in captured.out
     assert "REJECTED" in captured.out
+    assert "Reject reason:     reported gain exceeds validator single-step threshold" in captured.out
 
 
 def test_protocol_main_usage_returns_error(capsys: pytest.CaptureFixture[str]) -> None:
-    exit_code = protocol_main([])
+    exit_code = protocol_main(["unexpected"])
 
     captured = capsys.readouterr()
 
     assert exit_code == 1
-    assert "Usage: python -m autoresearch.protocol demo" in captured.err
+    assert "Usage: python -m autoresearch.protocol [demo]" in captured.err
 
 
 def test_package_main_uses_sys_argv(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(sys, "argv", ["autoresearch"])
+
+    exit_code = autoresearch_main.main()
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert "AUTORESEARCH NETWORK" in captured.out
+    assert "Validator Submission Cycle" in captured.out
+
+
+def test_package_main_demo_alias_still_works(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -437,4 +505,4 @@ def test_package_main_uses_sys_argv(
     captured = capsys.readouterr()
 
     assert exit_code == 0
-    assert "AUTORESEARCH NETWORK" in captured.out
+    assert "Validator Submission Cycle" in captured.out

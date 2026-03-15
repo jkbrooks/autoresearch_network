@@ -1,0 +1,51 @@
+═══════════════════════════════════════════════════════
+  [1m[36mAUTORESEARCH NETWORK — Validator Submission Cycle[0m
+═══════════════════════════════════════════════════════
+
+[1m[VALIDATOR] Creating experiment challenge...[0m
+  Task ID:           round_20260315_001
+  Global best bpb:   0.997900
+  Baseline train.py: (first 5 lines shown)
+    │ import math
+    │ import torch
+    │ 
+    │ DEPTH = 8
+    │ WIDTH = 768
+
+[1m[MINER] Running AutoResearch experiment loop...[0m
+  Hardware tier:     large (≤36 GB)
+  Elapsed time:      1 second
+  Peak VRAM:         8,910.2 MB
+  Result val_bpb:    0.994200
+  Improvement:       -0.0037 (0.37% better)
+  Modified train.py: (first 3 changed lines shown)
+    │ - DEPTH = 8
+    │ + DEPTH = 10
+    │ - LEARNING_RATE = 0.0200
+
+[1m[VALIDATOR] Validating submission...[0m
+  [1m[32m✓[0m val_bpb in plausible range
+  [1m[32m✓[0m train_py differs from baseline
+  [1m[32m✓[0m hardware_tier valid
+  [1m[32m✓[0m elapsed_wall_seconds in range
+  [1m[32m✓[0m improvement within single-step cap
+  [1m[32m✓[0m val_bpb within tier plausibility range
+  [1m[32m✓[0m peak_vram_mb within tier range
+  Result: [1m[32mVALID[0m
+
+[1m[SCORING] Computing reward...[0m
+  Improvement delta:  0.003700
+  Relative gain:      0.37%
+  Score:              0.74 / 1.00
+
+[1m[VALIDATOR] Reviewing next submission...[0m
+  Task ID:           round_20260315_002
+  Status:            flagged during pre-score validation
+  Reason:            reported gain exceeds validator single-step threshold
+  Validation result: [1m[31m✗ REJECTED[0m
+  Error: "Improvement of 10.8% exceeds maximum single-step threshold of 10.0%"
+
+═══════════════════════════════════════════════════════
+  Submission cycle complete. Awaiting next validator round.
+  Total time: 0.256 seconds
+═══════════════════════════════════════════════════════

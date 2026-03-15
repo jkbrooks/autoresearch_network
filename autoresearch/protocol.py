@@ -149,12 +149,60 @@ def _diff_preview(before: str, after: str, *, limit: int = 3) -> list[str]:
     return changed[:limit]
 
 
+def _format_elapsed(elapsed_seconds: float) -> str:
+    if elapsed_seconds < 1:
+        return f"{elapsed_seconds:.3f} seconds"
+    return f"{elapsed_seconds:.2f} seconds"
+
+
+def _demo_pacing(is_interactive: bool) -> tuple[float, float, float]:
+    if is_interactive:
+        return 0.2, 0.5, 10.0
+    return 0.0, 0.0, 0.0
+
+
+def _emit_block(lines: Sequence[str], *, line_delay: float, section_delay: float) -> None:
+    for line in lines:
+        print(line, flush=True)
+        time.sleep(line_delay)
+    time.sleep(section_delay)
+
+
+def _progress_bar(progress: float, *, width: int = 20) -> str:
+    filled = round(progress * width)
+    return f"[{'█' * filled}{'░' * (width - filled)}]"
+
+
+def _emit_loading_state(*, total_duration: float, is_interactive: bool) -> None:
+    if not is_interactive:
+        return
+
+    phases = [
+        "warmup complete: baseline checkpoint loaded",
+        "compiler ready: kernels and optimizer state prepared",
+        "throughput stable: step timings converging",
+        "validation sweep: score trace and VRAM samples locked",
+        "payload ready: submission package finalized",
+    ]
+    step_duration = total_duration / len(phases)
+    for index, phase in enumerate(phases, start=1):
+        progress = index / len(phases)
+        print(
+            "  Progress:         "
+            f"{_style(_progress_bar(progress), CYAN, bold=True)} "
+            f"{int(progress * 100):>3}%  {phase}",
+            flush=True,
+        )
+        time.sleep(step_duration)
+
+
 def run_demo() -> int:
     """Run the self-contained protocol demo."""
 
     from autoresearch.mock import MockSubmissionFactory
 
     started_at = time.perf_counter()
+    line_delay, section_delay, miner_run_pause = _demo_pacing(sys.stdout.isatty())
     factory = MockSubmissionFactory(seed=42)
     submission = factory.make_submission(
         baseline_val_bpb=0.9979,
@@ -162,7 +210,7 @@ def run_demo() -> int:
         improvement=0.0037,
         task_id="round_20260315_001",
     )
-    rejected = factory.make_invalid_submission(reason="bogus_bpb")
+    rejected = factory.make_invalid_submission(reason="impossible_improvement")
     tier = HardwareTier(submission.hardware_tier or HardwareTier.LARGE.value)
     improvement = (submission.global_best_val_bpb - (submission.val_bpb or 0.0))
     relative_gain_pct = (improvement / submission.global_best_val_bpb) * 100
@@ -172,59 +220,119 @@ def run_demo() -> int:
     )
     diff_lines = _diff_preview(submission.baseline_train_py, submission.train_py or "")
 
-    print("═══════════════════════════════════════════════════════")
-    print(f"  {_style('AUTORESEARCH NETWORK — Protocol Demo', CYAN, bold=True)}")
-    print("═══════════════════════════════════════════════════════")
-    print()
-    print(_style("[VALIDATOR] Creating experiment challenge...", bold=True))
-    print(f"  Task ID:           {submission.task_id}")
-    print(f"  Global best bpb:   {submission.global_best_val_bpb:.6f}")
-    print("  Baseline train.py: (first 5 lines shown)")
-    for line in _first_lines(submission.baseline_train_py, 5):
-        print(f"    │ {line}")
-    print()
-    print(_style("[MINER] Running AutoResearch experiment loop...", bold=True))
-    print(f"  Hardware tier:     {_hardware_tier_label(tier)}")
-    print(f"  Elapsed time:      {submission.elapsed_wall_seconds} seconds")
-    print(f"  Peak VRAM:         {submission.peak_vram_mb:,.1f} MB")
-    print(f"  Result val_bpb:    {submission.val_bpb:.6f}")
-    print(f"  Improvement:       -{improvement:.4f} ({relative_gain_pct:.2f}% better)")
-    print("  Modified train.py: (first 3 changed lines shown)")
-    for line in diff_lines:
-        print(f"    │ {line}")
-    print()
-    print(_style("[VALIDATOR] Validating submission...", bold=True))
+    _emit_block(
+        [
+            "═══════════════════════════════════════════════════════",
+            f"  {_style('AUTORESEARCH NETWORK — Validator Submission Cycle', CYAN, bold=True)}",
+            "═══════════════════════════════════════════════════════",
+            "",
+        ],
+        line_delay=line_delay,
+        section_delay=section_delay,
+    )
+    _emit_block(
+        [
+            _style("[VALIDATOR] Creating experiment challenge...", bold=True),
+            f"  Task ID:           {submission.task_id}",
+            f"  Global best bpb:   {submission.global_best_val_bpb:.6f}",
+            "  Baseline train.py: (first 5 lines shown)",
+            *[f"    │ {line}" for line in _first_lines(submission.baseline_train_py, 5)],
+            "",
+        ],
+        line_delay=line_delay,
+        section_delay=section_delay,
+    )
+    _emit_block(
+        [
+            _style("[MINER] Running AutoResearch experiment loop...", bold=True),
+            f"  Hardware tier:     {_hardware_tier_label(tier)}",
+            "  Training window:   executing timed run...",
+            "  Metrics stream:    collecting loss, throughput, and VRAM samples...",
+            "",
+        ],
+        line_delay=line_delay,
+        section_delay=0.0,
+    )
+    _emit_loading_state(total_duration=miner_run_pause, is_interactive=sys.stdout.isatty())
+    _emit_block(
+        [
+            _style("[MINER] Finalizing experiment results...", bold=True),
+            f"  Elapsed time:      {submission.elapsed_wall_seconds} seconds",
+            f"  Peak VRAM:         {submission.peak_vram_mb:,.1f} MB",
+            f"  Result val_bpb:    {submission.val_bpb:.6f}",
+            f"  Improvement:       -{improvement:.4f} ({relative_gain_pct:.2f}% better)",
+            "  Modified train.py: (first 3 changed lines shown)",
+            *[f"    │ {line}" for line in diff_lines],
+            "",
+        ],
+        line_delay=line_delay,
+        section_delay=section_delay,
+    )
+    _emit_block(
+        [_style("[VALIDATOR] Validating submission...", bold=True)],
+        line_delay=line_delay,
+        section_delay=section_delay / 2,
+    )
     submission.validate()
-    for line in [
-        "val_bpb in plausible range",
-        "train_py differs from baseline",
-        "hardware_tier valid",
-        "elapsed_wall_seconds in range",
-        "improvement within single-step cap",
-        "val_bpb within tier plausibility range",
-        "peak_vram_mb within tier range",
-    ]:
-        print(f"  {_style('✓', GREEN, bold=True)} {line}")
-    print(f"  Result: {_style('VALID', GREEN, bold=True)}")
-    print()
-    print(_style("[SCORING] Computing reward...", bold=True))
-    print(f"  Improvement delta:  {improvement:.6f}")
-    print(f"  Relative gain:      {relative_gain_pct:.2f}%")
-    print(f"  Score:              {score:.2f} / {MAX_SCORE:.2f}")
-    print()
-    print(_style("[DEMO] Showing an invalid submission...", bold=True))
-    print("  Reason: bogus_bpb (val_bpb = 0.1)")
+    _emit_block(
+        [
+            f"  {_style('✓', GREEN, bold=True)} val_bpb in plausible range",
+            f"  {_style('✓', GREEN, bold=True)} train_py differs from baseline",
+            f"  {_style('✓', GREEN, bold=True)} hardware_tier valid",
+            f"  {_style('✓', GREEN, bold=True)} elapsed_wall_seconds in range",
+            f"  {_style('✓', GREEN, bold=True)} improvement within single-step cap",
+            f"  {_style('✓', GREEN, bold=True)} val_bpb within tier plausibility range",
+            f"  {_style('✓', GREEN, bold=True)} peak_vram_mb within tier range",
+            f"  Result: {_style('VALID', GREEN, bold=True)}",
+            "",
+        ],
+        line_delay=line_delay,
+        section_delay=section_delay,
+    )
+    _emit_block(
+        [
+            _style("[SCORING] Computing reward...", bold=True),
+            f"  Improvement delta:  {improvement:.6f}",
+            f"  Relative gain:      {relative_gain_pct:.2f}%",
+            f"  Score:              {score:.2f} / {MAX_SCORE:.2f}",
+            "",
+        ],
+        line_delay=line_delay,
+        section_delay=section_delay,
+    )
+    _emit_block(
+        [
+            _style("[VALIDATOR] Creating experiment challenge...", bold=True),
+            f"  Task ID:           {rejected.task_id}",
+            "  Candidate state:   validator challenge returned with implausible gain",
+            "  Reject reason:     reported gain exceeds validator single-step threshold",
+        ],
+        line_delay=line_delay,
+        section_delay=section_delay / 2,
+    )
     try:
         rejected.validate()
     except ValueError as exc:
-        print(f"  Validation result: {_style('✗ REJECTED', RED, bold=True)}")
-        print(f'  Error: "{exc}"')
+        _emit_block(
+            [
+                f"  Validation result: {_style('✗ REJECTED', RED, bold=True)}",
+                f'  Error: "{exc}"',
+                "",
+            ],
+            line_delay=line_delay,
+            section_delay=section_delay,
+        )
     elapsed = time.perf_counter() - started_at
-    print()
-    print("═══════════════════════════════════════════════════════")
-    print("  Demo complete. No GPU, chain, or wallet required.")
-    print(f"  Total time: {elapsed:.2f} seconds.")
-    print("═══════════════════════════════════════════════════════")
+    _emit_block(
+        [
+            "═══════════════════════════════════════════════════════",
+            "  Submission cycle complete. Awaiting next validator round.",
+            f"  Total time: {_format_elapsed(elapsed)}",
+            "═══════════════════════════════════════════════════════",
+        ],
+        line_delay=line_delay,
+        section_delay=0.0,
+    )
     return 0
 
 
@@ -232,9 +340,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     """CLI entrypoint for the protocol module."""
 
     args = list(argv if argv is not None else sys.argv[1:])
-    if args == ["demo"]:
+    if args in ([], ["demo"]):
         return run_demo()
-    print("Usage: python -m autoresearch.protocol demo", file=sys.stderr)
+    print("Usage: python -m autoresearch.protocol [demo]", file=sys.stderr)
     return 1
 
 

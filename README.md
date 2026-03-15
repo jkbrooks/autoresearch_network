@@ -59,8 +59,8 @@ python -m pip install -e .
 ## Run The Demo
 
 ```bash
-python -m autoresearch demo
-python -m autoresearch.protocol demo
+python -m autoresearch
+python -m autoresearch.protocol
 ```
 
 The demo is self-contained and does not require a GPU, Bittensor wallet, subnet registration, or network access after dependencies are installed.
