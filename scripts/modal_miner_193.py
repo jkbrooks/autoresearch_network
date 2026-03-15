@@ -58,6 +58,7 @@ SUCCESS_MARKERS = (
     "Serving miner axon on test netuid=193",
     "AxonInfo(",
     "test:193",
+    "Miner starting at block:",
 )
 FAILURE_MARKERS = (
     "[HEALTH FAIL]",
@@ -80,6 +81,8 @@ class LaunchConfig:
     mutation_model: str | None = None
     mutation_base_url: str | None = None
     debug_skip_health_check: bool = False
+    debug_allow_non_validator_queries: bool = False
+    debug_min_validator_stake: float | None = None
 
     @property
     def timeout_seconds(self) -> int:
@@ -109,6 +112,17 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     launch_parser.add_argument("--mutation-model", default=None)
     launch_parser.add_argument("--mutation-base-url", default=None)
     launch_parser.add_argument("--debug-skip-health-check", action="store_true")
+    launch_parser.add_argument(
+        "--debug-allow-non-validator-queries",
+        action="store_true",
+        help="Disable validator permit enforcement for smoke-test queries.",
+    )
+    launch_parser.add_argument(
+        "--debug-min-validator-stake",
+        type=float,
+        default=None,
+        help="Override the miner minimum validator stake for debugging.",
+    )
     launch_parser.add_argument(
         "--wallet-dir",
         default=str(DEFAULT_WALLET_DIR),
@@ -143,6 +157,8 @@ def main(argv: list[str] | None = None) -> int:
         mutation_model=args.mutation_model,
         mutation_base_url=args.mutation_base_url,
         debug_skip_health_check=args.debug_skip_health_check,
+        debug_allow_non_validator_queries=args.debug_allow_non_validator_queries,
+        debug_min_validator_stake=args.debug_min_validator_stake,
     )
     summary = launch_sandbox(config)
     print("")
@@ -310,6 +326,10 @@ def build_miner_command(
         command.extend(["--mutation-base-url", config.mutation_base_url])
     if config.debug_skip_health_check:
         command.append("--skip-health-check")
+    if config.debug_allow_non_validator_queries:
+        command.append("--no-blacklist.force-validator-permit")
+    if config.debug_min_validator_stake is not None:
+        command.extend(["--blacklist.min-stake", str(config.debug_min_validator_stake)])
     return command
 
 
@@ -347,6 +367,7 @@ def wait_for_startup_success(process: Any, *, startup_timeout_seconds: int) -> N
     ring = deque(maxlen=80)
     saw_serving = False
     saw_axon = False
+    saw_ready = False
 
     stdout_iter = iter(process.stdout)
     stderr_iter = iter(process.stderr)
@@ -366,10 +387,12 @@ def wait_for_startup_success(process: Any, *, startup_timeout_seconds: int) -> N
                 saw_serving = True
             if SUCCESS_MARKERS[1] in text and SUCCESS_MARKERS[2] in text:
                 saw_axon = True
+            if SUCCESS_MARKERS[3] in text:
+                saw_ready = True
             if any(marker in text for marker in FAILURE_MARKERS):
                 raise LauncherError("Miner startup failed:\n" + "\n".join(ring))
 
-        if saw_serving and saw_axon:
+        if saw_serving and saw_axon and saw_ready:
             return
 
         exit_code = process.poll()

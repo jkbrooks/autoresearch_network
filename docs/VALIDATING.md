@@ -207,3 +207,16 @@ Use this checklist before calling the validator implementation complete on testn
 6. Confirm the validator updates `global_best.json` and `best_train.py` when a better response arrives.
 7. Confirm `submission_hashes.json` and `miner_stats.json` persist across restart.
 8. Confirm weight submission succeeds against subtensor.
+
+## Validation Status
+
+Live testnet validation on 2026-03-14 against subnet `193` confirmed checklist items 1, 2, 3, 4, 5, 7, and 8:
+
+- validator started in `runtime=bittensor` mode
+- wallet and network checks passed, while stake and no-GPU conditions remained warnings
+- metagraph size was non-zero (`metagraph_n=1`)
+- the validator queried one real Modal-hosted miner axon on subnet `193`
+- validator state files persisted under the configured `--neuron.full-path` across restart
+- weight submission succeeded against subtensor
+
+The remaining open item is checklist step 6. During the live run, the validator queried the real miner but did not receive a valid submission, so `global_best.json` and `best_train.py` were not updated from a better response yet. Follow-up debugging showed that the miner process was still listening inside the Modal sandbox, but direct Dendrite calls to the on-chain numeric axon endpoint returned `503 Service unavailable`, which points to a Modal external routing incompatibility with Bittensor's IP-based axon dialing rather than a validator startup failure.

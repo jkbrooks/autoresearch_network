@@ -67,6 +67,12 @@ def build_parser() -> argparse.ArgumentParser:
         action=argparse.BooleanOptionalAction,
         default=True,
     )
+    parser.add_argument(
+        "--blacklist.min-stake",
+        dest="blacklist_min_stake",
+        type=float,
+        default=1000.0,
+    )
 
     parser.add_argument("--mutation-provider", dest="mutation_provider", default="none")
     parser.add_argument("--mutation-model", dest="mutation_model", default=None)
@@ -113,6 +119,7 @@ def build_config(args: list[str] | None = None) -> SimpleNamespace:
         blacklist=SimpleNamespace(
             allow_non_registered=namespace.blacklist_allow_non_registered,
             force_validator_permit=namespace.blacklist_force_validator_permit,
+            min_stake=namespace.blacklist_min_stake,
         ),
         mutation_provider=namespace.mutation_provider,
         mutation_model=namespace.mutation_model,

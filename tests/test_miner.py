@@ -205,6 +205,18 @@ def test_blacklist_skip_validator_permit(monkeypatch) -> None:
     assert blocked is False
 
 
+def test_blacklist_min_stake_override(monkeypatch) -> None:
+    miner = make_miner(monkeypatch)
+    hotkey = miner.wallet.hotkey.ss58_address
+    miner.config.blacklist.min_stake = 0.0
+    miner.metagraph = SimpleNamespace(hotkeys=[hotkey], validator_permit=[True], S=[0.0])
+    synapse = make_synapse()
+    synapse.dendrite = {"hotkey": hotkey}
+    blocked, reason = asyncio.run(miner.blacklist(synapse))
+    assert blocked is False
+    assert reason == "Recognized validator"
+
+
 def test_priority_returns_stake(monkeypatch) -> None:
     miner = make_miner(monkeypatch)
     hotkey = miner.wallet.hotkey.ss58_address

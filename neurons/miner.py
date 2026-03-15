@@ -143,8 +143,9 @@ class Miner(BaseMinerNeuron):
             and not self.metagraph.validator_permit[uid]
         ):
             return True, "Not a validator"
-        if float(self.metagraph.S[uid]) < MIN_VALIDATOR_STAKE:
-            return True, f"Insufficient stake: {self.metagraph.S[uid]} < {MIN_VALIDATOR_STAKE}"
+        min_stake = float(getattr(self.config.blacklist, "min_stake", MIN_VALIDATOR_STAKE))
+        if float(self.metagraph.S[uid]) < min_stake:
+            return True, f"Insufficient stake: {self.metagraph.S[uid]} < {min_stake}"
         return False, "Recognized validator"
 
     async def priority(self, synapse: ExperimentSubmission) -> float:

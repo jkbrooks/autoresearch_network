@@ -66,6 +66,8 @@ def test_build_miner_command_includes_optional_mutation_flags(tmp_path: Path) ->
         mutation_model="local-model",
         mutation_base_url="http://localhost:8000",
         debug_skip_health_check=True,
+        debug_allow_non_validator_queries=True,
+        debug_min_validator_stake=0.0,
     )
     command = build_miner_command(config, "1.2.3.4", 45678)
     rendered = " ".join(command)
@@ -73,6 +75,8 @@ def test_build_miner_command_includes_optional_mutation_flags(tmp_path: Path) ->
     assert "--mutation-model local-model" in rendered
     assert "--mutation-base-url http://localhost:8000" in rendered
     assert "--skip-health-check" in rendered
+    assert "--no-blacklist.force-validator-permit" in rendered
+    assert "--blacklist.min-stake 0.0" in rendered
 
 
 def test_resolve_forward_hostname_success(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -96,6 +100,7 @@ def test_wait_for_startup_success_detects_serving_logs() -> None:
                 "setup ok\n",
                 "Serving miner axon on test netuid=193\n",
                 "AxonInfo(abc, 1.2.3.4:8091) -> test:193\n",
+                "Miner starting at block: 12345\n",
             ]
         ),
         stderr=iter([]),
