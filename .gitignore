@@ -8,7 +8,6 @@ build/
 venv/
 *.egg
 .uv/
-uv.lock
 *.log
 .DS_Store
 wandb/
@@ -17,3 +16,7 @@ checkpoints/
 ~/.bittensor/wallets/
 .autoresearch-key
 config.js
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.coverage*
