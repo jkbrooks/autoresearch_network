@@ -1,10 +1,8 @@
 """AutoResearch miner neuron."""
 
-from __future__ import annotations
-
 import os
 import threading
-from typing import Any
+from typing import Any, Tuple
 
 import bittensor as bt
 
@@ -125,7 +123,7 @@ class Miner(BaseMinerNeuron):
         finally:
             self._experiment_lock.release()
 
-    async def blacklist(self, synapse: ExperimentSubmission) -> tuple[bool, str]:
+    async def blacklist(self, synapse: ExperimentSubmission) -> Tuple[bool, str]:
         hotkey = _extract_hotkey(getattr(synapse, "dendrite", None))
         if hotkey is None:
             return True, "Missing dendrite or hotkey"
