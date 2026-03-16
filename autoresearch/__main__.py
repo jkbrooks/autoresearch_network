@@ -13,7 +13,7 @@ def _usage() -> str:
             "Commands:",
             "  protocol-demo       Run the scripted protocol walkthrough",
             "  validator-showcase  Run the local validator round walkthrough",
-            "  live-relay-proof    Run the live signed relay proof against the current miner",
+            "  network-check       Run the live signed network check against the current miner",
             "  miner-probe         Run the live signed miner probe only",
             "  demo                Alias for protocol-demo",
         ]
@@ -35,7 +35,7 @@ def main(argv: list[str] | None = None) -> int:
         from autoresearch.validator_round_showcase import main as showcase_main
 
         return showcase_main(rest)
-    if command == "live-relay-proof":
+    if command in {"network-check", "live-relay-proof"}:
         from autoresearch.live_relay_proof import main as relay_main
 
         return relay_main(rest)

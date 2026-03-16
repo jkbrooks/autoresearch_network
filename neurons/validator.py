@@ -17,7 +17,7 @@ from numpy.typing import NDArray
 os.environ.setdefault("PYDANTIC_DISABLE_PLUGINS", "logfire-plugin")
 
 from autoresearch.base import BaseValidatorNeuron
-from autoresearch.demo_format import run_with_spinner
+from autoresearch.demo_format import demo_pacing, emit_loading_state, run_with_spinner
 from autoresearch.experiment_runner import ExperimentRunner
 from autoresearch.hardware import detect_hardware
 from autoresearch.validator.best_tracker import BestTracker
@@ -331,16 +331,27 @@ def main() -> int:
         f"runtime={validator.runtime_mode}",
     )
     if args.run_once:
+        is_interactive = sys.stdout.isatty()
+        _, _, loading_pause = demo_pacing(is_interactive)
         print(
             "[RUN-ONCE] Preparing validator round:",
             f"current_best={validator.tracker.val_bpb}",
             f"serving_miners={_serving_miner_count(validator)}",
             "weight_submit_wait=false",
         )
+        emit_loading_state(
+            total_duration=min(loading_pause, 1.8),
+            phases=[
+                "wallet loaded: validator hotkey ready",
+                "metagraph synced: serving miners discovered",
+                "round prepared: tracker, guards, and weights ready",
+            ],
+            is_interactive=is_interactive,
+        )
         final_scores = run_with_spinner(
             lambda: asyncio.run(validator.forward()),
             label="querying miners, scoring responses, and submitting weights",
-            enabled=sys.stdout.isatty(),
+            enabled=is_interactive,
         )
         print("[RUN-ONCE] Validator round finished.")
         print("Round complete:", final_scores.tolist())

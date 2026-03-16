@@ -62,12 +62,12 @@ python -m pip install -e .
 python -m autoresearch --help
 python -m autoresearch protocol-demo
 python -m autoresearch validator-showcase
-python -m autoresearch live-relay-proof
+python -m autoresearch network-check
 python -m autoresearch miner-probe
 python autoresearch/validator_round_showcase.py
 ```
 
-`protocol-demo` and `validator-showcase` are local walkthroughs. `live-relay-proof` and
+`protocol-demo` and `validator-showcase` are local walkthroughs. `network-check` and
 `miner-probe` use the current relay-backed network path and therefore require the live testnet
 setup to be available.
 

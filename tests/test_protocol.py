@@ -495,7 +495,7 @@ def test_package_main_uses_sys_argv(
 
     assert exit_code == 0
     assert "Usage: python -m autoresearch <command>" in captured.out
-    assert "live-relay-proof" in captured.out
+    assert "network-check" in captured.out
 
 
 def test_package_main_demo_alias_still_works(

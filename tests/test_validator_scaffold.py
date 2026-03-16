@@ -147,6 +147,8 @@ def test_validator_cli_run_once_persists_state_files(tmp_path) -> None:
     )
 
     assert result.returncode == 0
+    assert "[RUN-ONCE] Preparing validator round:" in result.stdout
+    assert "[RUN-ONCE] Validator round finished." in result.stdout
     assert (state_dir / "state.npz").exists()
     assert (state_dir / "global_best.json").exists()
     assert (state_dir / "best_train.py").exists()

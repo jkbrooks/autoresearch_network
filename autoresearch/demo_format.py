@@ -72,21 +72,31 @@ def run_with_spinner(
     label: str,
     interval: float = 0.12,
     enabled: bool = True,
+    show_elapsed: bool = True,
 ):
     if not enabled:
         return fn()
 
     stop_event = Event()
     frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+    started_at = time.perf_counter()
+    last_render_width = 0
 
     def _spin() -> None:
+        nonlocal last_render_width
         index = 0
         while not stop_event.is_set():
             frame = frames[index % len(frames)]
-            print(f"\r  Waiting:          {frame} {label}", end="", flush=True)
+            elapsed_suffix = ""
+            if show_elapsed:
+                elapsed_seconds = int(time.perf_counter() - started_at)
+                elapsed_suffix = f" ({elapsed_seconds}s elapsed)"
+            rendered = f"  Waiting:          {frame} {label}{elapsed_suffix}"
+            last_render_width = max(last_render_width, len(rendered))
+            print(f"\r{rendered.ljust(last_render_width)}", end="", flush=True)
             index += 1
             time.sleep(interval)
-        print("\r" + " " * (len(label) + 24) + "\r", end="", flush=True)
+        print("\r" + " " * last_render_width + "\r", end="", flush=True)
 
     spinner = Thread(target=_spin, daemon=True)
     spinner.start()

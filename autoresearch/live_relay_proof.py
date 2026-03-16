@@ -1,4 +1,4 @@
-"""Live proof against the current relay-backed AutoResearch miner."""
+"""Operational network check against the current relay-backed AutoResearch miner."""
 
 from __future__ import annotations
 
@@ -88,7 +88,7 @@ async def _run_probe(
 
     dendrite = bt.Dendrite(wallet=wallet)
     synapse = ExperimentSubmission(
-        task_id="live_relay_proof",
+        task_id="network_check",
         baseline_train_py=PLAUSIBLE_BASELINE,
         global_best_val_bpb=1.1,
     )
@@ -153,7 +153,7 @@ def _resolve_target_ss58(
     return local_ss58
 
 
-def run_live_relay_proof(
+def run_network_check(
     *,
     as_json: bool = False,
     include_validator_state: bool = True,
@@ -182,7 +182,7 @@ def run_live_relay_proof(
         emit_block(
             [
                 "═══════════════════════════════════════════════════════",
-                f"  {style('AUTORESEARCH NETWORK — Live Relay Proof', CYAN, bold=True)}",
+                f"  {style('AUTORESEARCH NETWORK — Network Check', CYAN, bold=True)}",
                 "═══════════════════════════════════════════════════════",
                 "",
                 style("[DISCOVERY] Inspecting the currently advertised miner endpoint", bold=True),
@@ -277,7 +277,7 @@ def run_live_relay_proof(
     emit_block(
         [
             "═══════════════════════════════════════════════════════",
-            f"  Live proof complete in {time.perf_counter() - started_at:.2f} seconds",
+            f"  Network check complete in {time.perf_counter() - started_at:.2f} seconds",
             "═══════════════════════════════════════════════════════",
         ],
         line_delay=line_delay,
@@ -286,9 +286,15 @@ def run_live_relay_proof(
     return 0
 
 
+def run_live_relay_proof(**kwargs: Any) -> int:
+    """Backwards-compatible alias for the older command/function name."""
+
+    return run_network_check(**kwargs)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Live relay proof for the current AutoResearch miner"
+        description="Operational network check for the current AutoResearch miner"
     )
     parser.add_argument("--json", action="store_true", help="Render the probe result as JSON.")
     parser.add_argument(
@@ -309,7 +315,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--timeout", type=float, default=120.0)
     parser.add_argument("--validator-state-path", default=DEFAULT_VALIDATOR_STATE_PATH)
     args = parser.parse_args(argv)
-    return run_live_relay_proof(
+    return run_network_check(
         as_json=args.json,
         include_validator_state=not args.probe_only,
         wallet_name=args.wallet_name,

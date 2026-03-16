@@ -1,6 +1,6 @@
 import math
 class GPTConfig:
-    n_layer: int = 10
+    n_layer: int = 14
     n_embd: int = 768
     window_pattern: str = "SSSL"
 UNEMBEDDING_LR = 0.004000
