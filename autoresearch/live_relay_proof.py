@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import sys
 import textwrap
 import time
 import warnings
@@ -165,9 +166,16 @@ def run_live_relay_proof(
     timeout: float = 120.0,
     validator_state_path: str = DEFAULT_VALIDATOR_STATE_PATH,
 ) -> int:
-    from autoresearch.demo_format import CYAN, demo_pacing, emit_block, emit_loading_state, style
+    from autoresearch.demo_format import (
+        CYAN,
+        demo_pacing,
+        emit_block,
+        emit_loading_state,
+        run_with_spinner,
+        style,
+    )
 
-    is_interactive = True
+    is_interactive = sys.stdout.isatty()
     line_delay, section_delay, loading_pause = demo_pacing(is_interactive)
     started_at = time.perf_counter()
     if not as_json:
@@ -203,21 +211,24 @@ def run_live_relay_proof(
                 "wallet loaded: signed caller hotkey ready",
                 "metagraph synced: target axon discovered",
                 "relay path opened: public endpoint dialed",
-                "miner response returned: signed payload accepted",
             ],
             is_interactive=is_interactive,
         )
 
-    payload = asyncio.run(
-        _run_probe(
-            wallet_name=wallet_name,
-            wallet_hotkey=wallet_hotkey,
-            wallet_path=wallet_path,
-            target_hotkey=target_hotkey,
-            network=network,
-            netuid=netuid,
-            timeout=timeout,
-        )
+    payload = run_with_spinner(
+        lambda: asyncio.run(
+            _run_probe(
+                wallet_name=wallet_name,
+                wallet_hotkey=wallet_hotkey,
+                wallet_path=wallet_path,
+                target_hotkey=target_hotkey,
+                network=network,
+                netuid=netuid,
+                timeout=timeout,
+            )
+        ),
+        label="awaiting miner response",
+        enabled=not as_json,
     )
     if include_validator_state:
         payload["validator_state"] = _load_validator_state(validator_state_path)

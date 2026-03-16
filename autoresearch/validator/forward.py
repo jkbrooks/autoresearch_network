@@ -143,7 +143,7 @@ async def forward(self: Any) -> NDArray[np.float64]:
         metagraph=self.metagraph,
         current_best_bpb=baseline_best,
     )
-    self.set_weights(final_scores_array)
+    self.set_weights()
 
     responding = sum(1 for response in responses if getattr(response, "val_bpb", None) is not None)
     best_this_round = min(

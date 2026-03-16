@@ -6,13 +6,18 @@ import argparse
 import asyncio
 import json
 import logging
+import os
+import sys
 from dataclasses import asdict
 from typing import Any
 
 import numpy as np
 from numpy.typing import NDArray
 
+os.environ.setdefault("PYDANTIC_DISABLE_PLUGINS", "logfire-plugin")
+
 from autoresearch.base import BaseValidatorNeuron
+from autoresearch.demo_format import run_with_spinner
 from autoresearch.experiment_runner import ExperimentRunner
 from autoresearch.hardware import detect_hardware
 from autoresearch.validator.best_tracker import BestTracker
@@ -34,6 +39,15 @@ def _make_runtime_wallet(wallet_name: str, wallet_hotkey: str) -> Any:
             "hotkey": type("Hotkey", (), {"ss58_address": wallet_hotkey})(),
         },
     )()
+
+
+def _serving_miner_count(validator: Any) -> int:
+    metagraph_uids = (
+        validator.metagraph.uids.tolist()
+        if hasattr(validator.metagraph.uids, "tolist")
+        else list(validator.metagraph.uids)
+    )
+    return sum(1 for uid in metagraph_uids if validator.metagraph.axons[int(uid)].is_serving)
 
 
 class Validator(BaseValidatorNeuron):
@@ -317,7 +331,18 @@ def main() -> int:
         f"runtime={validator.runtime_mode}",
     )
     if args.run_once:
-        final_scores = asyncio.run(validator.forward())
+        print(
+            "[RUN-ONCE] Preparing validator round:",
+            f"current_best={validator.tracker.val_bpb}",
+            f"serving_miners={_serving_miner_count(validator)}",
+            "weight_submit_wait=false",
+        )
+        final_scores = run_with_spinner(
+            lambda: asyncio.run(validator.forward()),
+            label="querying miners, scoring responses, and submitting weights",
+            enabled=sys.stdout.isatty(),
+        )
+        print("[RUN-ONCE] Validator round finished.")
         print("Round complete:", final_scores.tolist())
     validator.save_state()
     return 0

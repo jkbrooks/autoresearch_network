@@ -5,6 +5,7 @@ from __future__ import annotations
 import sys
 import time
 from collections.abc import Sequence
+from threading import Event, Thread
 
 RESET = "\033[0m"
 BOLD = "\033[1m"
@@ -63,3 +64,34 @@ def emit_loading_state(
             flush=True,
         )
         time.sleep(step_duration)
+
+
+def run_with_spinner(
+    fn,
+    *,
+    label: str,
+    interval: float = 0.12,
+    enabled: bool = True,
+):
+    if not enabled:
+        return fn()
+
+    stop_event = Event()
+    frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+
+    def _spin() -> None:
+        index = 0
+        while not stop_event.is_set():
+            frame = frames[index % len(frames)]
+            print(f"\r  Waiting:          {frame} {label}", end="", flush=True)
+            index += 1
+            time.sleep(interval)
+        print("\r" + " " * (len(label) + 24) + "\r", end="", flush=True)
+
+    spinner = Thread(target=_spin, daemon=True)
+    spinner.start()
+    try:
+        return fn()
+    finally:
+        stop_event.set()
+        spinner.join(timeout=1)
