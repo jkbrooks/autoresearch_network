@@ -5,7 +5,11 @@ from types import SimpleNamespace
 
 import pytest
 
-from autoresearch.live_relay_proof import _resolve_target_ss58, run_live_relay_proof
+from autoresearch.live_relay_proof import (
+    _load_probe_challenge,
+    _resolve_target_ss58,
+    run_live_relay_proof,
+)
 
 
 def test_resolve_target_ss58_accepts_registered_ss58() -> None:
@@ -54,6 +58,24 @@ def test_resolve_target_ss58_rejects_unknown_hotkey(monkeypatch: pytest.MonkeyPa
         )
 
 
+def test_load_probe_challenge_reads_validator_state(tmp_path) -> None:
+    state_dir = tmp_path / "validator-state"
+    state_dir.mkdir()
+    metadata_path = state_dir / "global_best.json"
+    best_train_path = state_dir / "best_train.py"
+    metadata_path.write_text(
+        json.dumps({"val_bpb": 0.9979, "achieved_by": "5miner"}),
+        encoding="utf-8",
+    )
+    best_train_path.write_text("print('current best')\n", encoding="utf-8")
+
+    challenge = _load_probe_challenge(str(metadata_path))
+
+    assert challenge["global_best_val_bpb"] == 0.9979
+    assert challenge["best_train_path"] == str(best_train_path)
+    assert challenge["baseline_train_py"] == "print('current best')\n"
+
+
 def test_run_live_relay_proof_json_is_machine_readable(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
@@ -77,6 +99,15 @@ def test_run_live_relay_proof_json_is_machine_readable(
 
     monkeypatch.setattr("autoresearch.live_relay_proof._run_probe", fake_run_probe)
     monkeypatch.setattr(
+        "autoresearch.live_relay_proof._load_probe_challenge",
+        lambda path: {
+            "baseline_train_py": "print('current best')\n",
+            "best_train_path": "/tmp/best_train.py",
+            "global_best_val_bpb": 0.9979,
+            "metadata_path": "/tmp/global_best.json",
+        },
+    )
+    monkeypatch.setattr(
         "autoresearch.live_relay_proof._load_validator_state",
         lambda path: {"val_bpb": 0.9979, "achieved_by": "5miner"},
     )
@@ -88,4 +119,5 @@ def test_run_live_relay_proof_json_is_machine_readable(
     payload = json.loads(captured.out)
     assert payload["target_endpoint"] == "44.209.235.221:8091"
     assert payload["dendrite_status"] == 200
+    assert payload["challenge"]["global_best_val_bpb"] == 0.9979
     assert payload["validator_state"]["val_bpb"] == 0.9979

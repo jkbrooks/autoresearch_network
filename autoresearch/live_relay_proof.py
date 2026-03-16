@@ -6,11 +6,10 @@ import argparse
 import asyncio
 import json
 import sys
-import textwrap
 import time
 import warnings
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 warnings.filterwarnings(
     "ignore",
@@ -26,35 +25,6 @@ DEFAULT_TARGET_HOTKEY = "default"
 DEFAULT_WALLET_PATH = "~/.bittensor/wallets"
 DEFAULT_VALIDATOR_STATE_PATH = ".validator-state-live/global_best.json"
 
-PLAUSIBLE_BASELINE = textwrap.dedent(
-    """\
-    import math
-
-    class GPTConfig:
-        n_layer: int = 12
-        n_embd: int = 768
-        window_pattern: str = "SSSL"
-
-    UNEMBEDDING_LR = 0.004000
-    EMBEDDING_LR = 0.600000
-    SCALAR_LR = 0.500000
-    MATRIX_LR = 0.020000
-    TOTAL_BATCH_SIZE = 2**19
-
-    _ = math.sqrt(16)
-    print("---")
-    print("val_bpb:          0.997900")
-    print("training_seconds: 300.0")
-    print("total_seconds:    301.2")
-    print("peak_vram_mb:     24000.0")
-    print("mfu_percent:      39.80")
-    print("total_tokens_M:   60.0")
-    print("num_steps:        953")
-    print("num_params_M:     50.3")
-    print("depth:            8")
-    """
-).strip()
-
 
 async def _run_probe(
     *,
@@ -65,6 +35,8 @@ async def _run_probe(
     network: str,
     netuid: int,
     timeout: float,
+    baseline_train_py: str,
+    global_best_val_bpb: float,
 ) -> dict[str, Any]:
     import bittensor as bt
     from bittensor_wallet.wallet import Wallet
@@ -89,8 +61,8 @@ async def _run_probe(
     dendrite = bt.Dendrite(wallet=wallet)
     synapse = ExperimentSubmission(
         task_id="network_check",
-        baseline_train_py=PLAUSIBLE_BASELINE,
-        global_best_val_bpb=1.1,
+        baseline_train_py=baseline_train_py,
+        global_best_val_bpb=global_best_val_bpb,
     )
     response = await dendrite.call(
         target_axon,
@@ -121,7 +93,42 @@ def _load_validator_state(path: str) -> dict[str, Any] | None:
     state_path = Path(path)
     if not state_path.exists():
         return None
-    return json.loads(state_path.read_text(encoding="utf-8"))
+    payload = json.loads(state_path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError(f"Validator state file {state_path} does not contain a JSON object")
+    return cast(dict[str, Any], payload)
+
+
+def _load_probe_challenge(validator_state_path: str) -> dict[str, Any]:
+    metadata_path = Path(validator_state_path)
+    if not metadata_path.exists():
+        raise FileNotFoundError(
+            f"Validator state metadata file not found: {metadata_path}"
+        )
+
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    global_best_val_bpb = metadata.get("val_bpb")
+    if not isinstance(global_best_val_bpb, (int, float)):
+        raise ValueError(
+            f"Validator state file {metadata_path} is missing a numeric val_bpb."
+        )
+
+    best_train_path = metadata_path.with_name("best_train.py")
+    if not best_train_path.exists():
+        raise FileNotFoundError(
+            f"Validator state train file not found: {best_train_path}"
+        )
+
+    baseline_train_py = best_train_path.read_text(encoding="utf-8")
+    if not baseline_train_py.strip():
+        raise ValueError(f"Validator state train file is empty: {best_train_path}")
+
+    return {
+        "baseline_train_py": baseline_train_py,
+        "best_train_path": str(best_train_path),
+        "global_best_val_bpb": float(global_best_val_bpb),
+        "metadata_path": str(metadata_path),
+    }
 
 
 def _resolve_target_ss58(
@@ -178,6 +185,7 @@ def run_network_check(
     is_interactive = sys.stdout.isatty()
     line_delay, section_delay, loading_pause = demo_pacing(is_interactive)
     started_at = time.perf_counter()
+    challenge = _load_probe_challenge(validator_state_path)
     if not as_json:
         emit_block(
             [
@@ -199,7 +207,8 @@ def run_network_check(
             [
                 style("[PROBE] Sending a signed Dendrite request through the relay", bold=True),
                 "  Request shape:      ExperimentSubmission",
-                "  Probe baseline:     plausible large-tier metrics",
+                "  Probe baseline:     current validator best_train.py",
+                f"  Current best bpb:   {challenge['global_best_val_bpb']:.6f}",
                 "",
             ],
             line_delay=line_delay,
@@ -225,11 +234,19 @@ def run_network_check(
                 network=network,
                 netuid=netuid,
                 timeout=timeout,
+                baseline_train_py=challenge["baseline_train_py"],
+                global_best_val_bpb=challenge["global_best_val_bpb"],
             )
         ),
         label="awaiting miner response",
         enabled=not as_json,
     )
+    payload["challenge"] = {
+        "global_best_val_bpb": challenge["global_best_val_bpb"],
+        "best_train_path": challenge["best_train_path"],
+        "metadata_path": challenge["metadata_path"],
+        "baseline_train_py_len": len(challenge["baseline_train_py"]),
+    }
     if include_validator_state:
         payload["validator_state"] = _load_validator_state(validator_state_path)
 
@@ -315,18 +332,25 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--timeout", type=float, default=120.0)
     parser.add_argument("--validator-state-path", default=DEFAULT_VALIDATOR_STATE_PATH)
     args = parser.parse_args(argv)
-    return run_network_check(
-        as_json=args.json,
-        include_validator_state=not args.probe_only,
-        wallet_name=args.wallet_name,
-        wallet_hotkey=args.wallet_hotkey,
-        wallet_path=args.wallet_path,
-        target_hotkey=args.target_hotkey,
-        network=args.network,
-        netuid=args.netuid,
-        timeout=args.timeout,
-        validator_state_path=args.validator_state_path,
-    )
+    try:
+        return run_network_check(
+            as_json=args.json,
+            include_validator_state=not args.probe_only,
+            wallet_name=args.wallet_name,
+            wallet_hotkey=args.wallet_hotkey,
+            wallet_path=args.wallet_path,
+            target_hotkey=args.target_hotkey,
+            network=args.network,
+            netuid=args.netuid,
+            timeout=args.timeout,
+            validator_state_path=args.validator_state_path,
+        )
+    except (FileNotFoundError, ValueError) as exc:
+        if args.json:
+            print(json.dumps({"error": str(exc)}, indent=2, sort_keys=True))
+        else:
+            print(f"error: {exc}", file=sys.stderr)
+        return 2
 
 
 if __name__ == "__main__":

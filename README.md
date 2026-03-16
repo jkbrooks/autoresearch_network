@@ -68,8 +68,9 @@ python autoresearch/validator_round_showcase.py
 ```
 
 `protocol-demo` and `validator-showcase` are local walkthroughs. `network-check` and
-`miner-probe` use the current relay-backed network path and therefore require the live testnet
-setup to be available.
+`miner-probe` use the current relay-backed network path and build their probe from the persisted
+live validator state under `--neuron.full-path`, so they require the live testnet setup and
+current validator state files to be available.
 
 ## Development Checks
 

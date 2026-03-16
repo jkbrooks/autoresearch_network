@@ -33,5 +33,14 @@ jobs:
       - name: Mypy
         run: uv run mypy autoresearch
 
-      - name: Pytest + coverage gate
-        run: uv run pytest
+      - name: Pytest
+        run: uv run pytest -q
+
+      - name: Protocol coverage gate
+        run: >
+          uv run pytest tests/test_protocol.py -q
+          --cov=autoresearch.protocol
+          --cov=autoresearch.mock
+          --cov=autoresearch.constants
+          --cov-report=term-missing
+          --cov-fail-under=100

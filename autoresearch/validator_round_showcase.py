@@ -12,7 +12,7 @@ import warnings
 from dataclasses import dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 
@@ -155,16 +155,17 @@ async def _run_showcase() -> dict[str, Any]:
         final_scores = await validator.forward()
         validator.save_state()
 
-        response = validator.last_round["responses"][0]
+        responses = cast(list[Any], validator.last_round["responses"])
+        challenge = cast(Any, validator.last_round["challenge"])
+        miner_uids = cast(list[int], validator.last_round["miner_uids"])
+        response = responses[0]
         metrics = parse_metrics(response.run_log_tail or "")
 
         payload = {
             "runtime_mode": validator.runtime_mode,
-            "task_id": validator.last_round["challenge"].task_id,
-            "queried_miners": len(validator.last_round["miner_uids"]),
-            "responding_miners": sum(
-                1 for item in validator.last_round["responses"] if getattr(item, "val_bpb", None)
-            ),
+            "task_id": challenge.task_id,
+            "queried_miners": len(miner_uids),
+            "responding_miners": sum(1 for item in responses if getattr(item, "val_bpb", None)),
             "final_scores": final_scores.round(3).tolist(),
             "ema_scores": validator.scores.round(3).tolist(),
             "global_best": {

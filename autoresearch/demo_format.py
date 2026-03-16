@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import sys
 import time
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from threading import Event, Thread
+from typing import TypeVar
+
+T = TypeVar("T")
 
 RESET = "\033[0m"
 BOLD = "\033[1m"
@@ -67,13 +70,13 @@ def emit_loading_state(
 
 
 def run_with_spinner(
-    fn,
+    fn: Callable[[], T],
     *,
     label: str,
     interval: float = 0.12,
     enabled: bool = True,
     show_elapsed: bool = True,
-):
+) -> T:
     if not enabled:
         return fn()
 

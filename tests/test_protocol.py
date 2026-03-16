@@ -525,6 +525,17 @@ def test_package_main_validator_showcase_alias_works(
     assert "Weight submitted" in captured.out
 
 
+def test_protocol_main_validator_showcase_command_works(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    exit_code = protocol_main(["validator-showcase"])
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert "Validator Round Walkthrough" in captured.out
+    assert "Weight submitted" in captured.out
+
+
 def test_package_main_protocol_demo_command_works(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],

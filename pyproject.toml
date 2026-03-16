@@ -43,6 +43,9 @@ packages = [
 [tool.ruff]
 target-version = "py310"
 line-length = 100
+extend-exclude = [
+  ".validator-state*",
+]
 
 [tool.ruff.lint]
 select = [
@@ -69,10 +72,3 @@ ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = [
-  "--cov=autoresearch.protocol",
-  "--cov=autoresearch.mock",
-  "--cov=autoresearch.constants",
-  "--cov-report=term-missing",
-  "--cov-fail-under=100",
-]
